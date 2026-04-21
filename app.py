@@ -1,20 +1,18 @@
 import os
 import sys
-import json
 import cv2
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from werkzeug.utils import secure_filename
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
 import base64
-from io import BytesIO
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database import AttendanceDatabase
-from config import DB_PATH, STORED_IMAGES_DIR
+from config import DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
 from image_processing import compare_images
 
 # Flask app with correct paths to web folder
@@ -25,21 +23,59 @@ app = Flask(__name__,
 CORS(app)
 
 db = AttendanceDatabase(DB_PATH)
+Path(STORED_IMAGES_DIR).mkdir(parents=True, exist_ok=True)
+
+
+def error_response(message: str, status_code: int = 400):
+    return jsonify({"error": message}), status_code
+
+
+def decode_base64_image(image_data: str):
+    if not image_data or "," not in image_data:
+        raise ValueError("Image data must be a base64 data URL")
+
+    image_bytes = base64.b64decode(image_data.split(",", 1)[1])
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Unable to decode image data")
+    return image
+
+
+def normalized_image_filename(student_id: str):
+    safe_id = secure_filename(student_id).strip()
+    if not safe_id:
+        raise ValueError("Invalid student_id for image filename")
+    return f"{safe_id}.jpg"
+
+
+def student_to_dict(student):
+    if student is None:
+        return None
+    return {
+        "tag_id": student["tag_id"],
+        "student_id": student["student_id"],
+        "name": student["name"],
+        "stored_image": student["stored_image"],
+    }
+
+
+def get_request_json():
+    return request.get_json(silent=True) or {}
 
 @app.route('/')
 def index():
     return render_template('dashboard.html')
 
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok"})
+
 @app.route('/api/students', methods=['GET'])
 def get_students():
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM students")
-        students = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        students = [student_to_dict(row) for row in db.list_students()]
         return jsonify(students)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -47,37 +83,39 @@ def get_students():
 @app.route('/api/students', methods=['POST'])
 def add_student():
     try:
-        data = request.json
-        tag_id = data.get('tag_id')
-        student_id = data.get('student_id')
-        name = data.get('name')
-        
+        data = get_request_json()
+        tag_id = (data.get('tag_id') or '').strip()
+        student_id = (data.get('student_id') or '').strip()
+        name = (data.get('name') or '').strip()
+
+        if not tag_id or not student_id or not name:
+            return error_response("tag_id, student_id, and name are required")
+
         image_data = data.get('image')
         if image_data:
-            image_bytes = base64.b64decode(image_data.split(',')[1])
-            nparr = np.frombuffer(image_bytes, np.uint8)
-            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            image_filename = f"{student_id}.jpg"
+            image = decode_base64_image(image_data)
+            image_filename = normalized_image_filename(student_id)
             image_path = Path(STORED_IMAGES_DIR) / image_filename
-            cv2.imwrite(str(image_path), image)
+            if not cv2.imwrite(str(image_path), image):
+                return error_response("Failed to save student image", 500)
         else:
-            image_filename = f"{student_id}.jpg"
-        
+            return error_response("Student image is required")
+
         db.add_student(tag_id, student_id, name, image_filename)
-        return jsonify({"message": "Student added successfully", "data": {"tag_id": tag_id, "student_id": student_id, "name": name}})
+        return jsonify({
+            "message": "Student added successfully",
+            "data": {"tag_id": tag_id, "student_id": student_id, "name": name, "stored_image": image_filename}
+        }), 201
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        message = str(e)
+        if "UNIQUE constraint failed: students.student_id" in message:
+            return error_response("student_id already exists", 409)
+        return jsonify({"error": message}), 500
 
 @app.route('/api/attendance', methods=['GET'])
 def get_attendance():
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM attendance_log ORDER BY timestamp DESC LIMIT 100")
-        logs = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        logs = [dict(row) for row in db.list_attendance(limit=100)]
         return jsonify(logs)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -85,22 +123,29 @@ def get_attendance():
 @app.route('/api/verify', methods=['POST'])
 def verify_attendance():
     try:
-        data = request.json
-        tag_id = data.get('tag_id')
+        data = get_request_json()
+        tag_id = (data.get('tag_id') or '').strip()
         image_data = data.get('image')
-        
+
+        if not tag_id:
+            return error_response("tag_id is required")
+        if not image_data:
+            return error_response("image is required")
+
         student = db.get_student_by_tag(tag_id)
         if student is None:
             return jsonify({"error": "Student not found", "match": False}), 404
-        
-        image_bytes = base64.b64decode(image_data.split(',')[1])
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        live_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
+        live_image = decode_base64_image(image_data)
         stored_image_path = Path(STORED_IMAGES_DIR) / student['stored_image']
+        if not stored_image_path.exists():
+            return error_response(f"Stored image missing for student {student['student_id']}", 404)
+
         stored_image = cv2.imread(str(stored_image_path))
-        
-        match, score = compare_images(live_image, stored_image, threshold=0.01)
+        if stored_image is None:
+            return error_response(f"Stored image could not be read for student {student['student_id']}", 500)
+
+        match, score = compare_images(live_image, stored_image, threshold=MATCH_THRESHOLD)
         
         return jsonify({
             "match": match,
@@ -117,21 +162,48 @@ def verify_attendance():
 @app.route('/api/confirm-attendance', methods=['POST'])
 def confirm_attendance():
     try:
-        data = request.json
-        tag_id = data.get('tag_id')
-        score = data.get('score', 0)
-        
+        data = get_request_json()
+        tag_id = (data.get('tag_id') or '').strip()
+        score = float(data.get('score', 0) or 0)
+
+        if not tag_id:
+            return error_response("tag_id is required")
+
         student = db.get_student_by_tag(tag_id)
         if student is None:
             return jsonify({"error": "Student not found"}), 404
-        
+
+        if db.has_attendance_for_date(student['student_id']):
+            return jsonify({
+                "error": "Attendance already marked for this student today",
+                "student_id": student['student_id']
+            }), 409
+
         db.mark_attendance(tag_id, student['student_id'], student['name'], status='present', notes=f"Score: {score:.3f}")
-        return jsonify({"message": "Attendance marked successfully"})
+        return jsonify({"message": "Attendance marked successfully", "score": score})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/student/<student_id>/image', methods=['GET'])
+def get_student_image(student_id):
+    try:
+        student = db.get_student_by_student_id(student_id)
+
+        if student is None:
+            return error_response("Student not found", 404)
+
+        image_path = Path(STORED_IMAGES_DIR) / student["stored_image"]
+        if not image_path.exists():
+            return error_response("Student image not found", 404)
+
+        return send_file(image_path)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/capture', methods=['POST'])
 def capture_image():
+    camera = None
     try:
         print("Initializing camera for capture...")
         from camera import CameraManager
@@ -155,6 +227,12 @@ def capture_image():
     except Exception as e:
         print(f"Camera capture error: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        if camera is not None:
+            try:
+                camera.release()
+            except Exception:
+                pass
 
 if __name__ == '__main__':
     # For Raspberry Pi deployment, bind to all interfaces

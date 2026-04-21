@@ -1,68 +1,56 @@
 # Raspberry Pi 5 Deployment Guide - Smart Attendance System
 
-## 🚀 Quick Start
+## Quick Start
+
 ```bash
-# 1. Transfer project to Pi
+# 1. Transfer project to the Pi
 scp -r smart-attendance-system pi@192.168.1.100:~
 
-# 2. SSH to Pi and run setup
+# 2. SSH into the Pi and run setup
 ssh pi@192.168.1.100
-cd smart-attendance-system
-chmod +x pi_setup.sh pi5_optimize.sh
+cd ~/smart-attendance-system
+chmod +x pi_setup.sh pi5_optimize.sh pi5_quickref.sh
 ./pi_setup.sh
 
-# 3. Optional: Performance optimizations
-./pi5_optimize.sh
-sudo reboot
+# 3. Log out and back in once so group changes apply
+# 4. Start the service
+sudo systemctl start attendance
 
-# 4. Access web interface
+# 5. Open the web interface
 # http://<pi-ip>:5000
 ```
 
-## 📋 Hardware Requirements
+## Hardware Requirements
 
 ### Raspberry Pi 5
-- Raspberry Pi 5 (4GB or 8GB RAM recommended)
-- MicroSD card (32GB+ Class 10)
-- Power supply (27W USB-C recommended)
-- Cooling (active cooling recommended for sustained use)
+
+- Raspberry Pi 5
+- MicroSD card, 32 GB or larger
+- Reliable power supply
+- Cooling recommended for long use
 
 ### Camera
-- USB webcam (Logitech C920, C270, or similar)
-- Alternative: Raspberry Pi Camera Module 3 (with adapter)
 
-### NFC Reader (Optional)
+- USB webcam, or
+- Raspberry Pi camera module
+
+### NFC Reader
+
 - MFRC522 RFID/NFC module
-- Connection: SPI interface
+- SPI connection enabled on the Pi
 
-### Buttons (Optional)
-- 2x Push buttons for manual confirmation/retry
-- GPIO pins: 17 (confirm), 27 (retry)
+### Buttons
 
-## 🔧 Detailed Setup Steps
+- Green confirm button on GPIO 17
+- Red retry button on GPIO 27
 
-### Step 1: Initial Pi Setup
-```bash
-# Update Raspberry Pi OS
-sudo apt update && sudo apt full-upgrade -y
+## Hardware Wiring
 
-# Enable interfaces
-sudo raspi-config
-# - Interfacing Options > Camera > Enable
-# - Interfacing Options > SPI > Enable
-# - Interfacing Options > I2C > Enable (optional)
-```
+### RC522 to Raspberry Pi 5
 
-### Step 2: Hardware Connections
-
-#### USB Camera
-- Simply plug into any USB port
-- No additional configuration needed
-
-#### NFC Reader (MFRC522)
-```
+```text
 MFRC522     | Raspberry Pi 5
------------|----------------
+----------- | ----------------
 VCC         | 3.3V (Pin 1)
 GND         | GND (Pin 6)
 RST         | GPIO 22 (Pin 15)
@@ -70,247 +58,117 @@ IRQ         | Not connected
 MISO        | GPIO 9 (Pin 21)
 MOSI        | GPIO 10 (Pin 19)
 SCK         | GPIO 11 (Pin 23)
-SDA/SS      | GPIO 8 (Pin 24)
+SDA / SS    | GPIO 8 (Pin 24)
 ```
 
-#### Buttons (Optional)
-```
-Button 1 (Confirm) | GPIO 17 (Pin 11)
-Button 2 (Retry)   | GPIO 27 (Pin 13)
-GND                | GND (Pin 9)
+### Buttons
+
+```text
+Confirm button | GPIO 17 (Pin 11)
+Retry button   | GPIO 27 (Pin 13)
+Ground         | GND (Pin 9)
 ```
 
-### Step 3: Software Installation
-Run the automated setup script:
+## Software Setup
+
+### 1. Enable Interfaces
+
 ```bash
+sudo raspi-config
+```
+
+Enable:
+
+- `Interface Options > SPI`
+- camera support if you use a Pi camera module
+
+### 2. Run Setup Script
+
+```bash
+cd ~/smart-attendance-system
 ./pi_setup.sh
 ```
 
-This will:
-- ✅ Update system packages
-- ✅ Install dependencies
-- ✅ Setup virtual environment
-- ✅ Configure permissions
-- ✅ Create systemd service
-- ✅ Test hardware
+This script:
 
-### Step 4: Performance Optimization (Optional)
+- installs required system packages
+- creates the Python virtual environment
+- installs `requirements.txt`
+- enables SPI
+- initializes the database
+- creates the `attendance` systemd service
+
+### 3. Start and Check the Service
+
 ```bash
-./pi5_optimize.sh
-sudo reboot
+sudo systemctl start attendance
+sudo systemctl status attendance
 ```
 
-## 🌐 Network Configuration
+### 4. Open the Dashboard
 
-### Find Pi IP Address
+Find the Pi IP:
+
 ```bash
 hostname -I
-# or
-ip addr show wlan0 | grep inet
 ```
 
-### Static IP (Recommended)
-```bash
-sudo nano /etc/dhcpcd.conf
-# Add at end:
-interface wlan0
-static ip_address=192.168.1.100/24
-static routers=192.168.1.1
-static domain_name_servers=8.8.8.8 8.8.4.4
+Open:
+
+```text
+http://<pi-ip>:5000
 ```
 
-### Port Forwarding (External Access)
-Configure your router to forward port 5000 to the Pi's IP.
+## Helpful Commands
 
-## 🔒 Security Setup
+Use the helper script:
 
-### Change Default Password
 ```bash
-passwd
+./pi5_quickref.sh status
+./pi5_quickref.sh logs
+./pi5_quickref.sh restart
+./pi5_quickref.sh camera-test
+./pi5_quickref.sh gpio-test
+./pi5_quickref.sh init-db
 ```
 
-### SSH Key Authentication
+## Troubleshooting
+
+### Camera not detected
+
 ```bash
-# On your computer
-ssh-keygen -t rsa -b 4096
-ssh-copy-id pi@192.168.1.100
-
-# Disable password authentication
-sudo nano /etc/ssh/sshd_config
-# Change: PasswordAuthentication no
-sudo systemctl restart ssh
-```
-
-### Firewall
-```bash
-sudo apt install ufw
-sudo ufw allow ssh
-sudo ufw allow 5000
-sudo ufw enable
-```
-
-## 📊 Monitoring & Maintenance
-
-### Service Management
-```bash
-# Check status
-sudo systemctl status attendance
-
-# View logs
-sudo journalctl -u attendance -f
-
-# Restart service
-sudo systemctl restart attendance
-
-# Stop service
-sudo systemctl stop attendance
-```
-
-### Performance Monitoring
-```bash
-# System resources
-htop
-
-# I/O monitoring
-sudo iotop
-
-# Camera test
+ls /dev/video*
 python3 -c "import cv2; cap = cv2.VideoCapture(0); print('OK' if cap.isOpened() else 'FAIL'); cap.release()"
 ```
 
-### Log Rotation
+### RC522 not working
+
 ```bash
-sudo nano /etc/logrotate.d/attendance
-# Add:
-/home/pi/smart-attendance-system/logs/*.log {
-    daily
-    rotate 7
-    compress
-    missingok
-    notifempty
-}
+lsmod | grep spi
+groups $USER
 ```
 
-## 🛠 Troubleshooting
+Make sure SPI is enabled and the user has access to the needed groups.
 
-### Camera Issues
+### Service logs
+
 ```bash
-# Check camera detection
-ls /dev/video*
-
-# Test camera access
-sudo usermod -a -G video pi
-# Logout and login again
-
-# Test OpenCV
-python3 -c "import cv2; print(cv2.__version__)"
+sudo journalctl -u attendance -f
 ```
 
-### GPIO Issues
-```bash
-# Check GPIO permissions
-groups pi
+### Reinitialize sample data
 
-# Add to dialout group
-sudo usermod -a -G dialout pi
+```bash
+python3 main.py --init-db
 ```
 
-### Memory Issues
-```bash
-# Check memory usage
-free -h
+## Notes
 
-# Clear cache
-sudo sync; sudo echo 3 > /proc/sys/vm/drop_caches
-```
-
-### Network Issues
-```bash
-# Check network
-ping 8.8.8.8
-
-# Restart networking
-sudo systemctl restart dhcpcd
-```
-
-## 📱 Mobile Access
-
-### From Phone/Tablet
-- Connect to same WiFi network
-- Access: `http://<pi-ip>:5000`
-
-### Remote Access (VPN)
-```bash
-# Install Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-
-# Get Tailscale IP and access remotely
-```
-
-## 🔄 Backup & Recovery
-
-### Backup Data
-```bash
-# Backup database and images
-tar -czf backup_$(date +%Y%m%d).tar.gz data/
-
-# Backup entire project
-tar -czf full_backup_$(date +%Y%m%d).tar.gz smart-attendance-system/
-```
-
-### Restore from Backup
-```bash
-tar -xzf backup_20241201.tar.gz
-```
-
-## 📈 Performance Tuning
-
-### For High Traffic
-```bash
-# Increase workers in config
-MAX_WORKERS = 8
-
-# Use Gunicorn instead of Flask dev server
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 app:app
-```
-
-### Camera Optimization
-- Use higher resolution only when needed
-- Implement image caching
-- Adjust face recognition threshold based on lighting
-
-## 🎯 Production Deployment
-
-### SSL Certificate (HTTPS)
-```bash
-sudo apt install certbot
-certbot certonly --standalone -d yourdomain.com
-# Update Flask app to use SSL
-```
-
-### Load Balancing
-Use nginx as reverse proxy:
-```bash
-sudo apt install nginx
-# Configure nginx.conf for the app
-```
-
-### Database Optimization
-- Use PostgreSQL for production
-- Implement connection pooling
-- Add database migrations
-
-## 📞 Support
-
-For issues:
-1. Check logs: `sudo journalctl -u attendance -f`
-2. Test components individually
-3. Verify hardware connections
-4. Check network connectivity
-5. Monitor system resources
+- Attendance is marked only once per student per day.
+- The project works best as a local Pi-hosted system on the same network.
+- For a school project, SQLite is enough and keeps deployment simple.
 
 ---
-**Last Updated:** April 20, 2026
-**Compatible with:** Raspberry Pi 5, Raspberry Pi OS (64-bit)
+
+**Last Updated:** April 21, 2026  
+**Compatible with:** Raspberry Pi 5 and Raspberry Pi OS 64-bit

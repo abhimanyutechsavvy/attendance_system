@@ -55,13 +55,17 @@ case "$1" in
         tar -czf "backup_${TIMESTAMP}.tar.gz" data/
         echo "Backup created: backup_${TIMESTAMP}.tar.gz"
         ;;
+    "init-db")
+        echo "=== Initializing Database ==="
+        python3 main.py --init-db
+        ;;
     "update")
         echo "=== Updating System ==="
         sudo apt update && sudo apt upgrade -y
         echo "System updated"
         ;;
     *)
-        echo "Usage: $0 {status|logs|restart|stop|start|camera-test|gpio-test|system-info|network|backup|update}"
+        echo "Usage: $0 {status|logs|restart|stop|start|camera-test|gpio-test|system-info|network|backup|init-db|update}"
         echo ""
         echo "Examples:"
         echo "  $0 status     - Check service status"

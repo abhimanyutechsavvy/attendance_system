@@ -1,6 +1,7 @@
 let currentCapturedImage = null;
 let currentStudentData = null;
 let videoStream = null;
+let currentVerificationScore = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -12,7 +13,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function setupEventListeners() {
     document.getElementById('tagInput').addEventListener('keypress', handleTagInput);
-    document.getElementById('captureBtn').addEventListener('click', captureImage);
     document.getElementById('confirmBtn').addEventListener('click', confirmAttendance);
     document.getElementById('retryBtn').addEventListener('click', resetVerification);
     document.getElementById('addStudentForm').addEventListener('submit', handleAddStudent);
@@ -27,6 +27,7 @@ async function initializeCamera() {
         </button>
         <div id="cameraStatus" class="mt-2 text-muted">Camera ready</div>
     `;
+    document.getElementById('captureBtn').addEventListener('click', captureImage);
     
     // Pre-warm the camera by making an initial capture and discard
     setTimeout(() => {
@@ -74,6 +75,7 @@ function captureImage() {
             }
             
             currentCapturedImage = data.image;
+            currentVerificationScore = null;
             
             const liveImage = document.getElementById('liveImage');
             liveImage.src = currentCapturedImage;
@@ -153,7 +155,8 @@ async function autoCaptureForVerification() {
             throw new Error(data.error);
         }
         
-        currentCapturedImage = data.image;
+            currentCapturedImage = data.image;
+            currentVerificationScore = null;
         
         const liveImage = document.getElementById('liveImage');
         liveImage.src = currentCapturedImage;
@@ -190,8 +193,13 @@ async function verifyImage() {
         });
         
         const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Verification failed');
+        }
         
         if (data.match) {
+            currentVerificationScore = data.score;
             const scoreClass = data.score > 0.05 ? 'match-score-high' : 'match-score-low';
             resultContainer.innerHTML = `
                 <div class="result-message result-success">
@@ -204,6 +212,7 @@ async function verifyImage() {
             document.getElementById('confirmBtn').style.display = 'block';
             document.getElementById('retryBtn').style.display = 'block';
         } else {
+            currentVerificationScore = data.score;
             resultContainer.innerHTML = `
                 <div class="result-message result-error">
                     <i class="bi bi-x-circle"></i> NO MATCH
@@ -226,10 +235,16 @@ async function confirmAttendance() {
         const response = await fetch('/api/confirm-attendance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tag_id: currentStudentData.tag_id, score: 0.012 })
+            body: JSON.stringify({
+                tag_id: currentStudentData.tag_id,
+                score: currentVerificationScore ?? 0
+            })
         });
         
         const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to confirm attendance');
+        }
         showResult('Attendance marked successfully!', 'success');
         resetVerification();
         loadAttendance();
@@ -238,13 +253,17 @@ async function confirmAttendance() {
             document.getElementById('tagInput').focus();
         }, 2000);
     } catch (error) {
-        showResult('Error marking attendance: ' + error.message, 'error');
+        const message = error.message.includes('already marked')
+            ? 'Attendance was already marked for this student today.'
+            : 'Error marking attendance: ' + error.message;
+        showResult(message, 'error');
     }
 }
 
 function resetVerification() {
     currentCapturedImage = null;
     currentStudentData = null;
+    currentVerificationScore = null;
     document.getElementById('liveImage').style.display = 'none';
     document.getElementById('livePlaceholder').style.display = 'block';
     document.getElementById('resultContainer').innerHTML = '<p class="text-muted">Waiting for verification...</p>';
@@ -264,6 +283,9 @@ async function loadStudents() {
     try {
         const response = await fetch('/api/students');
         const students = await response.json();
+        if (!response.ok) {
+            throw new Error(students.error || 'Failed to load students');
+        }
         
         let html = '<table class="table table-striped"><thead><tr><th>ID</th><th>Name</th><th>Tag</th><th>Photo</th></tr></thead><tbody>';
         
@@ -317,7 +339,8 @@ async function handleAddStudent(e) {
                 document.getElementById('addStudentForm').reset();
                 loadStudents();
             } else {
-                alert('Error adding student');
+                const payload = await response.json();
+                alert(payload.error || 'Error adding student');
             }
         } catch (error) {
             alert('Error: ' + error.message);
@@ -330,6 +353,9 @@ async function loadAttendance() {
     try {
         const response = await fetch('/api/attendance');
         const logs = await response.json();
+        if (!response.ok) {
+            throw new Error(logs.error || 'Failed to load attendance');
+        }
         
         let html = '<table class="table table-striped"><thead><tr><th>Student</th><th>Time</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
         

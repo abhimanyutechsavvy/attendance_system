@@ -20,7 +20,7 @@ class AttendanceDatabase:
             """
             CREATE TABLE IF NOT EXISTS students (
                 tag_id TEXT PRIMARY KEY,
-                student_id TEXT NOT NULL,
+                student_id TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 stored_image TEXT NOT NULL
             )
@@ -46,6 +46,16 @@ class AttendanceDatabase:
         cursor.execute("SELECT * FROM students WHERE tag_id = ?", (tag_id,))
         return cursor.fetchone()
 
+    def get_student_by_student_id(self, student_id: str) -> Optional[sqlite3.Row]:
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM students WHERE student_id = ?", (student_id,))
+        return cursor.fetchone()
+
+    def list_students(self):
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM students ORDER BY name ASC, student_id ASC")
+        return cursor.fetchall()
+
     def add_student(self, tag_id: str, student_id: str, name: str, stored_image: str):
         cursor = self.connection.cursor()
         cursor.execute(
@@ -53,6 +63,23 @@ class AttendanceDatabase:
             (tag_id, student_id, name, stored_image),
         )
         self.connection.commit()
+
+    def list_attendance(self, limit: int = 100):
+        cursor = self.connection.cursor()
+        cursor.execute(
+            "SELECT * FROM attendance_log ORDER BY timestamp DESC LIMIT ?",
+            (int(limit),),
+        )
+        return cursor.fetchall()
+
+    def has_attendance_for_date(self, student_id: str, date_prefix: Optional[str] = None) -> bool:
+        date_prefix = date_prefix or datetime.now().date().isoformat()
+        cursor = self.connection.cursor()
+        cursor.execute(
+            "SELECT 1 FROM attendance_log WHERE student_id = ? AND timestamp LIKE ? LIMIT 1",
+            (student_id, f"{date_prefix}%"),
+        )
+        return cursor.fetchone() is not None
 
     def mark_attendance(self, tag_id: str, student_id: str, name: str, status: str, notes: str = ""):
         cursor = self.connection.cursor()

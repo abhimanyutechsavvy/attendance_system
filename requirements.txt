@@ -5,3 +5,4 @@ mfrc522
 flask
 flask-cors
 pyserial
+keyboard
