@@ -48,7 +48,9 @@ This dual-verification flow reduces proxy attendance and improves reliability.
 - `camera.py` - camera capture helpers
 - `image_processing.py` - ORB image comparison logic
 - `joystick.py` - optional Arduino joystick keyboard bridge
+- `arduino_rfid_serial.py` - serial monitor for the combined Arduino RC522 and joystick bridge
 - `joystick_arduino.ino` - Arduino sketch for joystick serial output
+- `arduino_rfid_bridge.ino` - combined Arduino sketch for RC522 plus joystick over one USB serial link
 - `web/` - dashboard templates and static assets
 - `pi_setup.sh` - Raspberry Pi setup script
 - `RPI5_DEPLOYMENT_GUIDE.md` - Raspberry Pi deployment notes
@@ -115,6 +117,19 @@ Use the actual device name shown by:
 
 ```bash
 ls /dev/ttyACM* /dev/ttyUSB*
+```
+
+## Optional Combined Arduino Bridge
+
+If your Arduino sits between the Raspberry Pi and the hardware, upload `arduino_rfid_bridge.ino` to the Arduino. This sketch sends both:
+
+- `RFID:<uid>` when a card is scanned
+- `JOY:x,y,button` for joystick state
+
+You can monitor the combined serial output with:
+
+```bash
+python3 arduino_rfid_serial.py
 ```
 
 ## Notes

@@ -55,6 +55,11 @@ class JoystickKeyboardBridge:
             self.active_keys.remove(key)
 
     def parse_line(self, line: str):
+        if line.startswith("JOY:"):
+            line = line.split(":", 1)[1]
+        elif ":" in line:
+            raise ValueError(f"Ignoring non-joystick line: {line!r}")
+
         parts = [part.strip() for part in line.split(",")]
         if len(parts) != 3:
             raise ValueError(f"Expected 3 comma-separated values, received: {line!r}")
@@ -93,7 +98,8 @@ class JoystickKeyboardBridge:
                     x, y, button = self.parse_line(raw_line)
                     self.handle_input(x, y, button)
                 except ValueError as exc:
-                    print(f"Skipping malformed joystick data: {exc}")
+                    if "Ignoring non-joystick line" not in str(exc):
+                        print(f"Skipping malformed joystick data: {exc}")
         finally:
             self.close()
 

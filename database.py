@@ -22,6 +22,9 @@ class AttendanceDatabase:
                 tag_id TEXT PRIMARY KEY,
                 student_id TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
+                class_name TEXT DEFAULT '',
+                section TEXT DEFAULT '',
+                roll_no TEXT DEFAULT '',
                 stored_image TEXT NOT NULL
             )
             """
@@ -39,7 +42,16 @@ class AttendanceDatabase:
             )
             """
         )
+        self._ensure_column(cursor, "students", "class_name", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "students", "section", "TEXT DEFAULT ''")
+        self._ensure_column(cursor, "students", "roll_no", "TEXT DEFAULT ''")
         self.connection.commit()
+
+    def _ensure_column(self, cursor, table_name: str, column_name: str, definition: str):
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column_name not in columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     def get_student_by_tag(self, tag_id: str) -> Optional[sqlite3.Row]:
         cursor = self.connection.cursor()
@@ -56,11 +68,24 @@ class AttendanceDatabase:
         cursor.execute("SELECT * FROM students ORDER BY name ASC, student_id ASC")
         return cursor.fetchall()
 
-    def add_student(self, tag_id: str, student_id: str, name: str, stored_image: str):
+    def add_student(
+        self,
+        tag_id: str,
+        student_id: str,
+        name: str,
+        stored_image: str,
+        class_name: str = "",
+        section: str = "",
+        roll_no: str = "",
+    ):
         cursor = self.connection.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO students (tag_id, student_id, name, stored_image) VALUES (?, ?, ?, ?)",
-            (tag_id, student_id, name, stored_image),
+            """
+            INSERT OR REPLACE INTO students
+            (tag_id, student_id, name, class_name, section, roll_no, stored_image)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (tag_id, student_id, name, class_name, section, roll_no, stored_image),
         )
         self.connection.commit()
 

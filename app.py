@@ -56,6 +56,9 @@ def student_to_dict(student):
         "tag_id": student["tag_id"],
         "student_id": student["student_id"],
         "name": student["name"],
+        "class_name": student["class_name"] if "class_name" in student.keys() else "",
+        "section": student["section"] if "section" in student.keys() else "",
+        "roll_no": student["roll_no"] if "roll_no" in student.keys() else "",
         "stored_image": student["stored_image"],
     }
 
@@ -87,6 +90,9 @@ def add_student():
         tag_id = (data.get('tag_id') or '').strip()
         student_id = (data.get('student_id') or '').strip()
         name = (data.get('name') or '').strip()
+        class_name = (data.get('class_name') or '').strip()
+        section = (data.get('section') or '').strip()
+        roll_no = (data.get('roll_no') or '').strip()
 
         if not tag_id or not student_id or not name:
             return error_response("tag_id, student_id, and name are required")
@@ -101,10 +107,18 @@ def add_student():
         else:
             return error_response("Student image is required")
 
-        db.add_student(tag_id, student_id, name, image_filename)
+        db.add_student(tag_id, student_id, name, image_filename, class_name=class_name, section=section, roll_no=roll_no)
         return jsonify({
             "message": "Student added successfully",
-            "data": {"tag_id": tag_id, "student_id": student_id, "name": name, "stored_image": image_filename}
+            "data": {
+                "tag_id": tag_id,
+                "student_id": student_id,
+                "name": name,
+                "class_name": class_name,
+                "section": section,
+                "roll_no": roll_no,
+                "stored_image": image_filename,
+            }
         }), 201
     except Exception as e:
         message = str(e)
@@ -153,7 +167,10 @@ def verify_attendance():
             "student": {
                 "name": student['name'],
                 "student_id": student['student_id'],
-                "tag_id": student['tag_id']
+                "tag_id": student['tag_id'],
+                "class_name": student['class_name'] if 'class_name' in student.keys() else "",
+                "section": student['section'] if 'section' in student.keys() else "",
+                "roll_no": student['roll_no'] if 'roll_no' in student.keys() else "",
             }
         })
     except Exception as e:
