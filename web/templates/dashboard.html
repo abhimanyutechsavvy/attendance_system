@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark sticky-top">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1"><i class="bi bi-card-checklist"></i> Smart Attendance System</span>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="verification-tab" data-bs-toggle="tab" data-bs-target="#verification" type="button" role="tab">
+                    <i class="bi bi-camera"></i> Verification
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="students-tab" data-bs-toggle="tab" data-bs-target="#students" type="button" role="tab">
+                    <i class="bi bi-people"></i> Students
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="attendance-tab" data-bs-toggle="tab" data-bs-target="#attendance" type="button" role="tab">
+                    <i class="bi bi-clipboard-check"></i> Attendance Log
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabContent">
+            <!-- Verification Tab -->
+            <div class="tab-pane fade show active" id="verification" role="tabpanel">
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-rfid"></i> NFC Tag ID</h5>
+                            </div>
+                            <div class="card-body">
+                                <input type="text" class="form-control form-control-lg" id="tagInput" placeholder="Enter NFC tag ID or scan" autofocus>
+                                <small class="text-muted">Test: 123456789012</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0"><i class="bi bi-camera"></i> Camera Feed</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="cameraContainer">
+                                    <div class="text-center text-muted">
+                                        <i class="bi bi-camera-fill" style="font-size: 3rem;"></i>
+                                        <p>Pi Camera Ready</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header bg-warning">
+                                <h5 class="mb-0"><i class="bi bi-image"></i> Live Capture</h5>
+                            </div>
+                            <div class="card-body" style="height: 300px; background: #f0f0f0; display: flex; align-items: center; justify-content: center;">
+                                <img id="liveImage" src="" alt="Live capture" style="max-width: 100%; max-height: 100%; display: none;">
+                                <span class="text-muted" id="livePlaceholder">No image captured</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0"><i class="bi bi-check-circle"></i> Verification Result</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="resultContainer" class="text-center">
+                                    <p class="text-muted">Waiting for verification...</p>
+                                </div>
+                                <button class="btn btn-success w-100 mt-3" id="confirmBtn" style="display: none;">
+                                    <i class="bi bi-check-lg"></i> Confirm Attendance
+                                </button>
+                                <button class="btn btn-danger w-100 mt-2" id="retryBtn" style="display: none;">
+                                    <i class="bi bi-arrow-clockwise"></i> Retry
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Students Tab -->
+            <div class="tab-pane fade" id="students" role="tabpanel">
+                <div class="row mt-4">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-person-plus"></i> Add New Student</h5>
+                            </div>
+                            <div class="card-body">
+                                <form id="addStudentForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">NFC Tag ID</label>
+                                        <input type="text" class="form-control" id="newTagId" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Student ID</label>
+                                        <input type="text" class="form-control" id="newStudentId" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Name</label>
+                                        <input type="text" class="form-control" id="newStudentName" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Photo</label>
+                                        <input type="file" class="form-control" id="newStudentImage" accept="image/*" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-plus-circle"></i> Add Student
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0"><i class="bi bi-list"></i> Student List</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="studentsList"><p class="text-muted">Loading...</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attendance Tab -->
+            <div class="tab-pane fade" id="attendance" role="tabpanel">
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0"><i class="bi bi-calendar-check"></i> Attendance Log</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="attendanceList"><p class="text-muted">Loading...</p></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
