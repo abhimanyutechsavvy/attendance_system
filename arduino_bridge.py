@@ -40,8 +40,10 @@ class ArduinoBridge:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._uid_queue: deque[str] = deque(maxlen=8)
+        self._decision_queue: deque[str] = deque(maxlen=8)
         self._joy_state = {"x": 512, "y": 512, "button": 1}
         self._last_button_was_down = False
+        self._last_y_zone = "center"
 
     # ------------------------------------------------------------------ lifecycle
     def start(self):
@@ -88,6 +90,7 @@ class ArduinoBridge:
             if uid:
                 with self._lock:
                     self._uid_queue.append(uid)
+                print(f"[ArduinoBridge] RFID received: {uid}")
         elif line.startswith("JOY:"):
             payload = line.split(":", 1)[1].strip()
             parts = payload.split(",")
@@ -97,9 +100,30 @@ class ArduinoBridge:
                 except ValueError:
                     return
                 with self._lock:
+                    previous_button = self._joy_state["button"]
                     self._joy_state = {"x": x, "y": y, "button": button}
+                    zone = "center"
+                    if y < self.deadzone_low:
+                        zone = "up"
+                    elif y > self.deadzone_high:
+                        zone = "down"
+
+                    if zone == "up" and self._last_y_zone != "up":
+                        self._decision_queue.append("confirm")
+                        print("[ArduinoBridge] Joystick decision: confirm")
+                    elif zone == "down" and self._last_y_zone != "down":
+                        self._decision_queue.append("retry")
+                        print("[ArduinoBridge] Joystick decision: retry")
+
+                    if button == 0 and previous_button != 0:
+                        self._decision_queue.append("confirm")
+                        print("[ArduinoBridge] Joystick button press: confirm")
+
+                    self._last_y_zone = zone
         elif line.startswith("SYSTEM:"):
             print(f"[ArduinoBridge] {line.split(':', 1)[1].strip()}")
+        else:
+            print(f"[ArduinoBridge] raw: {line}")
 
     # ------------------------------------------------------------------ API
     def pop_uid(self) -> Optional[str]:
@@ -117,6 +141,12 @@ class ArduinoBridge:
             if deadline is not None and time.time() >= deadline:
                 return None
             time.sleep(0.05)
+        return None
+
+    def pop_decision(self) -> Optional[str]:
+        with self._lock:
+            if self._decision_queue:
+                return self._decision_queue.popleft()
         return None
 
     def joystick_state(self) -> dict:

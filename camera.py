@@ -1,5 +1,6 @@
 import cv2
 import platform
+import numpy as np
 
 from config import (
     CAMERA_BRIGHTNESS,
@@ -73,10 +74,44 @@ def lock_camera_settings(camera):
         pass
 
 
+def enable_camera_auto_settings(camera):
+    """Return the webcam to its own auto pipeline."""
+    print("[cam] Enabling camera auto exposure / auto white balance.")
+    auto_ae = 0.75 if platform.system() == "Windows" else 3
+    _try_set(camera, cv2.CAP_PROP_AUTO_EXPOSURE, auto_ae, "AUTO_EXPOSURE=auto")
+    try:
+        _try_set(camera, cv2.CAP_PROP_AUTO_WB, 1, "AUTO_WB=on")
+    except Exception:
+        pass
+    try:
+        camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+    except Exception:
+        pass
+
+
+def _frame_looks_corrupted(frame) -> bool:
+    """Heuristic: catch heavily clipped and strongly color-skewed frames."""
+    if frame is None or frame.size == 0:
+        return True
+
+    channel_means = frame.reshape(-1, 3).mean(axis=0)
+    overall_mean = float(channel_means.mean())
+    if overall_mean < 1:
+        return True
+
+    brightness = frame.mean(axis=2)
+    clipped_ratio = float((brightness > 245).mean())
+    darkest_ratio = float((brightness < 10).mean())
+    color_spread = float(channel_means.max() / max(channel_means.min(), 1.0))
+
+    return clipped_ratio > 0.18 or darkest_ratio > 0.40 or color_spread > 1.8
+
+
 class CameraManager:
     def __init__(self, camera_index: int = CAMERA_INDEX):
         self.camera_index = camera_index
         self.camera = None
+        self.using_manual_settings = False
 
         # Try different backends based on platform
         if platform.system() == "Windows":
@@ -95,6 +130,7 @@ class CameraManager:
 
                     if CAMERA_LOCK_SETTINGS:
                         lock_camera_settings(self.camera)
+                        self.using_manual_settings = True
 
                     print(f"Camera opened successfully with backend {backend}")
                     break
@@ -106,6 +142,7 @@ class CameraManager:
             self.camera = cv2.VideoCapture(self.camera_index)
             if self.camera and self.camera.isOpened() and CAMERA_LOCK_SETTINGS:
                 lock_camera_settings(self.camera)
+                self.using_manual_settings = True
 
         if not self.camera.isOpened():
             raise RuntimeError(
@@ -134,6 +171,14 @@ class CameraManager:
         for attempt in range(3):
             ret, frame = self.camera.read()
             if ret:
+                if self.using_manual_settings and _frame_looks_corrupted(frame):
+                    print("[cam] Captured frame looks overexposed or color-skewed; falling back to auto settings.")
+                    enable_camera_auto_settings(self.camera)
+                    self.using_manual_settings = False
+                    for _ in range(10):
+                        self.camera.grab()
+                        time.sleep(0.03)
+                    continue
                 return frame
             print("Camera capture failed, retrying...")
             time.sleep(0.2)

@@ -12,7 +12,7 @@ import base64
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database import AttendanceDatabase
-from config import DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
+from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
 from image_processing import compare_images
 
 # Flask app with correct paths to web folder
@@ -24,6 +24,17 @@ CORS(app)
 
 db = AttendanceDatabase(DB_PATH)
 Path(STORED_IMAGES_DIR).mkdir(parents=True, exist_ok=True)
+arduino_bridge = None
+
+if ARDUINO_SERIAL_PORT:
+    try:
+        from arduino_bridge import ArduinoBridge
+        arduino_bridge = ArduinoBridge(ARDUINO_SERIAL_PORT, ARDUINO_BAUD_RATE)
+        arduino_bridge.start()
+        print(f"Web app connected to Arduino bridge on {ARDUINO_SERIAL_PORT}")
+    except Exception as exc:
+        print(f"[WARN] Arduino bridge unavailable in web app: {exc}")
+        arduino_bridge = None
 
 
 def error_response(message: str, status_code: int = 400):
@@ -74,6 +85,24 @@ def index():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "ok"})
+
+
+@app.route('/api/hardware/poll', methods=['GET'])
+def poll_hardware():
+    if arduino_bridge is None:
+        return jsonify({
+            "arduino_connected": False,
+            "tag_id": None,
+            "decision": None,
+            "joystick": None,
+        })
+
+    return jsonify({
+        "arduino_connected": True,
+        "tag_id": arduino_bridge.pop_uid(),
+        "decision": arduino_bridge.pop_decision(),
+        "joystick": arduino_bridge.joystick_state(),
+    })
 
 @app.route('/api/students', methods=['GET'])
 def get_students():

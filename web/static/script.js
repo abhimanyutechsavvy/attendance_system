@@ -1,6 +1,8 @@
 let currentCapturedImage = null;
 let currentStudentData = null;
 let currentVerificationScore = null;
+let hardwarePollTimer = null;
+let verificationAwaitsDecision = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     initializeNavigation();
@@ -10,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadAttendance();
     setupEventListeners();
     renderIdleState();
+    startHardwarePolling();
 });
 
 function initializeNavigation() {
@@ -81,6 +84,7 @@ async function warmUpCamera() {
 }
 
 function renderIdleState() {
+    verificationAwaitsDecision = false;
     setMachineBanner("System idle. Waiting for a student to approach and scan the NFC card.");
     setHeroSystemStatus("Ready");
     setStepState("arrival", "active");
@@ -89,6 +93,37 @@ function renderIdleState() {
     setStepState("confirm", "idle");
     document.getElementById("studentQuickView").innerHTML = "No student selected yet.";
     document.getElementById("finalReceipt").innerHTML = `<div class="receipt-state">Waiting for a successful verification.</div>`;
+}
+
+function startHardwarePolling() {
+    if (hardwarePollTimer) {
+        clearInterval(hardwarePollTimer);
+    }
+
+    hardwarePollTimer = setInterval(async () => {
+        try {
+            const response = await fetch("/api/hardware/poll");
+            const data = await response.json();
+            if (!response.ok) {
+                return;
+            }
+
+            if (data.tag_id) {
+                const tagInput = document.getElementById("tagInput");
+                tagInput.value = data.tag_id;
+                await processTag(data.tag_id);
+                tagInput.value = "";
+            }
+
+            if (verificationAwaitsDecision && data.decision === "confirm") {
+                await confirmAttendance();
+            } else if (verificationAwaitsDecision && data.decision === "retry") {
+                resetVerification();
+            }
+        } catch (error) {
+            console.log("Hardware poll unavailable", error);
+        }
+    }, 500);
 }
 
 function setMachineBanner(message) {
@@ -218,6 +253,11 @@ async function handleTagInput(event) {
     const tag = event.target.value.trim();
     if (!tag) return;
 
+    await processTag(tag);
+    event.target.value = "";
+}
+
+async function processTag(tag) {
     try {
         setHeroSystemStatus("Active");
         setMachineBanner("Student detected. Searching for NFC record...");
@@ -247,8 +287,6 @@ async function handleTagInput(event) {
     } catch (error) {
         showErrorResult(`Error: ${error.message}`);
     }
-
-    event.target.value = "";
 }
 
 async function captureImage() {
@@ -369,10 +407,12 @@ async function verifyImage() {
             setMachineBanner("Verification successful. Press the green button to mark attendance.");
             setStepState("capture", "completed");
             setStepState("confirm", "active");
+            verificationAwaitsDecision = true;
             document.getElementById("confirmBtn").style.display = "block";
             document.getElementById("retryBtn").style.display = "block";
         } else {
             setMachineBanner("Verification failed. Press the red button to retry.");
+            verificationAwaitsDecision = true;
             document.getElementById("confirmBtn").style.display = "none";
             document.getElementById("retryBtn").style.display = "block";
         }
@@ -403,6 +443,7 @@ async function confirmAttendance() {
         setHeroSystemStatus("Marked");
         setStepState("confirm", "completed");
         renderFinalReceipt(currentStudentData, currentVerificationScore ?? 0);
+        verificationAwaitsDecision = false;
         document.getElementById("resultContainer").innerHTML = `
             <div class="result-content">
                 <div class="result-pill success">Attendance Confirmed</div>
