@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 import time
 
 import serial
@@ -7,6 +9,30 @@ try:
     import keyboard
 except ImportError:
     keyboard = None
+
+
+def _warn_if_not_privileged():
+    """The 'keyboard' package can only inject keystrokes when running as
+    Administrator on Windows or root on Linux. Without that, the script
+    appears to do nothing - which is the most common cause of "joystick
+    not working" reports."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        else:
+            is_admin = (os.geteuid() == 0)
+    except Exception:
+        is_admin = True  # don't block on detection failure
+
+    if not is_admin:
+        print(
+            "[WARN] joystick.py needs Administrator (Windows) or root (Linux) "
+            "privileges to inject keystrokes via the 'keyboard' library. "
+            "Re-run this script from an elevated shell, otherwise no keys "
+            "will reach other applications.",
+            file=sys.stderr,
+        )
 
 
 LEFT_KEY = "left"
@@ -40,8 +66,9 @@ class JoystickKeyboardBridge:
         print(f"Connected to joystick on {self.serial_port} at {self.baud_rate} baud")
 
     def close(self):
-        for key in list(self.active_keys):
-            keyboard.release(key)
+        if keyboard is not None:
+            for key in list(self.active_keys):
+                keyboard.release(key)
         self.active_keys.clear()
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
@@ -85,6 +112,7 @@ class JoystickKeyboardBridge:
                 "The 'keyboard' package is not installed. Install it with 'pip install keyboard' before running this script."
             )
 
+        _warn_if_not_privileged()
         self.connect()
         print("READY - move the joystick and press Ctrl+C to stop")
 

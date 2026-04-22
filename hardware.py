@@ -16,7 +16,13 @@ from config import BUTTON_CONFIRM_PIN, BUTTON_RETRY_PIN
 
 
 class NFCReader:
-    def __init__(self):
+    def __init__(self, arduino_bridge=None):
+        self.arduino_bridge = arduino_bridge
+        if self.arduino_bridge is not None:
+            self.simulated = False
+            print("NFC reader using Arduino serial bridge.")
+            return
+
         self.simulated = SimpleMFRC522 is None
         if not self.simulated:
             try:
@@ -28,6 +34,13 @@ class NFCReader:
             print("[WARN] NFC hardware unavailable. Using manual tag input.")
 
     def wait_for_tag(self):
+        if self.arduino_bridge is not None:
+            print("Please tap your NFC ID card on the reader...")
+            uid = self.arduino_bridge.wait_for_uid(timeout=None)
+            if uid:
+                print(f"NFC tag detected: {uid}")
+            return uid
+
         if self.simulated:
             tag_id = input("[SIM] Enter NFC tag ID (or press Enter to retry): ").strip()
             return tag_id if tag_id else None
@@ -63,7 +76,14 @@ class VerificationButton:
 
 
 class ButtonController:
-    def __init__(self, confirm_pin: int = BUTTON_CONFIRM_PIN, retry_pin: int = BUTTON_RETRY_PIN):
+    def __init__(self, confirm_pin: int = BUTTON_CONFIRM_PIN, retry_pin: int = BUTTON_RETRY_PIN,
+                 arduino_bridge=None):
+        self.arduino_bridge = arduino_bridge
+        if self.arduino_bridge is not None:
+            self.simulated = False
+            print("Button input using Arduino joystick (UP=confirm, DOWN=retry, click=confirm).")
+            return
+
         self.simulated = not GPIO_AVAILABLE
         if not self.simulated:
             try:
@@ -80,17 +100,39 @@ class ButtonController:
             print("[WARN] Button input will use manual simulation.")
 
     def wait_for_decision(self, timeout: int = 30):
+        if self.arduino_bridge is not None:
+            print("Push joystick UP to confirm or DOWN to retry (click also confirms).")
+            return self.arduino_bridge.wait_for_decision(timeout=timeout)
+
         if self.simulated:
-            print("[SIM] Type 'confirm' or 'retry' and press Enter.")
-            start = time.time()
-            while True:
-                if time.time() - start > timeout:
-                    print("Button input timed out.")
-                    return None
-                choice = input("[SIM] Decision: ").strip().lower()
-                if choice in {"confirm", "retry"}:
-                    return choice
-                print("Please type 'confirm' or 'retry'.")
+            # Use the OpenCV window for input so it stays responsive on Windows.
+            try:
+                import cv2
+                print("[SIM] Press C in the window to confirm, R to retry, Q to quit.")
+                start = time.time()
+                while True:
+                    key = cv2.waitKey(50) & 0xFF
+                    if key == ord('c'):
+                        return "confirm"
+                    if key == ord('r'):
+                        return "retry"
+                    if key == ord('q') or key == 27:  # Q or ESC
+                        return None
+                    if 0 < timeout <= time.time() - start:
+                        print("Button input timed out.")
+                        return None
+            except Exception:
+                # Fallback to stdin if cv2 isn't available.
+                print("[SIM] Type 'confirm' or 'retry' and press Enter.")
+                start = time.time()
+                while True:
+                    if time.time() - start > timeout:
+                        print("Button input timed out.")
+                        return None
+                    choice = input("[SIM] Decision: ").strip().lower()
+                    if choice in {"confirm", "retry"}:
+                        return choice
+                    print("Please type 'confirm' or 'retry'.")
 
         print("Press green to confirm or red to retry.")
         start = time.time()

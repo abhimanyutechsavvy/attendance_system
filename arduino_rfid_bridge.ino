@@ -49,8 +49,10 @@ void sendJoystickState() {
 String readUidString() {
   String uid = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
-    uid += String(rfid.uid.uidByte[i], DEC);
+    if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+    uid += String(rfid.uid.uidByte[i], HEX);
   }
+  uid.toUpperCase();
   return uid;
 }
 

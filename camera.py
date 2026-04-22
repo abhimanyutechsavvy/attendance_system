@@ -1,7 +1,76 @@
 import cv2
 import platform
 
-from config import CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS
+from config import (
+    CAMERA_BRIGHTNESS,
+    CAMERA_CONTRAST,
+    CAMERA_EXPOSURE,
+    CAMERA_FPS,
+    CAMERA_GAIN,
+    CAMERA_HEIGHT,
+    CAMERA_INDEX,
+    CAMERA_LOCK_SETTINGS,
+    CAMERA_SATURATION,
+    CAMERA_WB_TEMPERATURE,
+    CAMERA_WIDTH,
+)
+
+
+def _try_set(camera, prop, value, label):
+    """Best-effort property write. Driver may silently ignore it."""
+    try:
+        ok = camera.set(prop, value)
+        actual = camera.get(prop)
+        print(f"  [cam] {label}: requested={value} actual={actual} {'OK' if ok else 'IGNORED'}")
+        return ok
+    except Exception as exc:
+        print(f"  [cam] {label}: failed ({exc})")
+        return False
+
+
+def _stream_alive(camera, attempts: int = 5) -> bool:
+    """Return True if the camera can still produce a frame."""
+    import time
+    for _ in range(attempts):
+        if camera.grab():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def lock_camera_settings(camera):
+    """Disable auto-exposure / auto-WB / autofocus and pin manual values
+    so the webcam stops re-calibrating between captures.
+
+    Some backends (notably Windows MSMF) interpret EXPOSURE in different
+    units than DSHOW, and writing the wrong value can stop the stream.
+    We test the stream after each risky write and roll the property back
+    to auto if the camera dies.
+    """
+    print("[cam] Locking exposure / white balance / gain ...")
+
+    manual_ae = 0.25 if platform.system() == "Windows" else 1
+    auto_ae = 0.75 if platform.system() == "Windows" else 3
+
+    _try_set(camera, cv2.CAP_PROP_AUTO_EXPOSURE, manual_ae, "AUTO_EXPOSURE=manual")
+    _try_set(camera, cv2.CAP_PROP_EXPOSURE, CAMERA_EXPOSURE, "EXPOSURE")
+    if not _stream_alive(camera):
+        print("  [cam] Manual exposure broke the stream - reverting to AUTO_EXPOSURE.")
+        _try_set(camera, cv2.CAP_PROP_AUTO_EXPOSURE, auto_ae, "AUTO_EXPOSURE=auto (rollback)")
+        # Drain the recovery
+        _stream_alive(camera, attempts=10)
+
+    _try_set(camera, cv2.CAP_PROP_GAIN, CAMERA_GAIN, "GAIN")
+    _try_set(camera, cv2.CAP_PROP_AUTO_WB, 0, "AUTO_WB=off")
+    _try_set(camera, cv2.CAP_PROP_WB_TEMPERATURE, CAMERA_WB_TEMPERATURE, "WB_TEMPERATURE")
+    _try_set(camera, cv2.CAP_PROP_BRIGHTNESS, CAMERA_BRIGHTNESS, "BRIGHTNESS")
+    _try_set(camera, cv2.CAP_PROP_CONTRAST, CAMERA_CONTRAST, "CONTRAST")
+    _try_set(camera, cv2.CAP_PROP_SATURATION, CAMERA_SATURATION, "SATURATION")
+
+    try:
+        camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+    except Exception:
+        pass
 
 
 class CameraManager:
@@ -19,38 +88,57 @@ class CameraManager:
             try:
                 self.camera = cv2.VideoCapture(self.camera_index, backend)
                 if self.camera.isOpened():
-                    # Set Pi 5 optimized camera properties
-                    if platform.system() == "Linux":
-                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-                        self.camera.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
-                        self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce latency
+                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+                    self.camera.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
+                    self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+                    if CAMERA_LOCK_SETTINGS:
+                        lock_camera_settings(self.camera)
+
                     print(f"Camera opened successfully with backend {backend}")
                     break
-            except:
+            except Exception:
                 continue
 
         # Fallback to default if no backend worked
         if not self.camera or not self.camera.isOpened():
             self.camera = cv2.VideoCapture(self.camera_index)
+            if self.camera and self.camera.isOpened() and CAMERA_LOCK_SETTINGS:
+                lock_camera_settings(self.camera)
 
         if not self.camera.isOpened():
-            raise RuntimeError(f"Unable to open camera index {self.camera_index}. Check /dev/video* on Linux or camera permissions.")
+            raise RuntimeError(
+                f"Unable to open camera index {self.camera_index}. "
+                "Check /dev/video* on Linux or camera permissions."
+            )
+
+        # Warm-up: many UVC cams need several frames to honor manual
+        # exposure / WB registers. Pull and discard so the next capture()
+        # returns a frame taken with the locked settings.
+        import time
+        for _ in range(10):
+            self.camera.grab()
+            time.sleep(0.03)
 
     def capture(self):
         print("Capturing live image from camera...")
-        
-        # Allow camera to stabilize and adjust settings
         import time
-        time.sleep(0.5)  # 500ms delay for camera stabilization
-        
+
+        # Flush stale buffered frames so we get one taken with the locked
+        # settings rather than a leftover from before initialization.
+        for _ in range(5):
+            self.camera.grab()
+            time.sleep(0.03)
+
         for attempt in range(3):
             ret, frame = self.camera.read()
             if ret:
                 return frame
             print("Camera capture failed, retrying...")
-            time.sleep(0.2)  # Brief delay between retries
+            time.sleep(0.2)
         raise RuntimeError("Camera failed to capture an image.")
 
     def release(self):
-        self.camera.release()
+        if self.camera is not None:
+            self.camera.release()

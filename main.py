@@ -4,7 +4,14 @@ import numpy as np
 from pathlib import Path
 
 from camera import CameraManager
-from config import DB_PATH, DISPLAY_WINDOW_NAME, MATCH_THRESHOLD, STORED_IMAGES_DIR
+from config import (
+    ARDUINO_BAUD_RATE,
+    ARDUINO_SERIAL_PORT,
+    DB_PATH,
+    DISPLAY_WINDOW_NAME,
+    MATCH_THRESHOLD,
+    STORED_IMAGES_DIR,
+)
 from database import AttendanceDatabase
 from hardware import ButtonController, NFCReader
 from image_processing import compare_images, draw_side_by_side
@@ -65,10 +72,16 @@ def main():
     nfc_reader = None
     camera = None
     button_controller = None
+    arduino_bridge = None
     try:
-        nfc_reader = NFCReader()
+        if ARDUINO_SERIAL_PORT:
+            from arduino_bridge import ArduinoBridge
+            arduino_bridge = ArduinoBridge(ARDUINO_SERIAL_PORT, ARDUINO_BAUD_RATE)
+            arduino_bridge.start()
+
+        nfc_reader = NFCReader(arduino_bridge=arduino_bridge)
         camera = CameraManager()
-        button_controller = ButtonController()
+        button_controller = ButtonController(arduino_bridge=arduino_bridge)
 
         while True:
             print("\n1) Tap the NFC card")
@@ -126,6 +139,8 @@ def main():
             button_controller.cleanup()
         if camera:
             camera.release()
+        if arduino_bridge:
+            arduino_bridge.stop()
         cv2.destroyAllWindows()
         db.close()
 

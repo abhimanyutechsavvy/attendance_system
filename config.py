@@ -35,6 +35,30 @@ NFC_SPI_DEVICE = getattr(__import__('__main__', fromlist=['NFC_SPI_DEVICE']), 'N
 # Camera
 CAMERA_INDEX = 0
 
+# Manual camera exposure / ISO lock.
+# These values are written to the capture device at initialization so the
+# webcam does NOT keep re-calibrating between captures. Tune for your room.
+#   CAMERA_EXPOSURE: log2 seconds on most UVC webcams via DirectShow.
+#                    Typical range -8 (very dark/fast) .. -1 (bright/slow).
+#                    -6 is a sane indoor default (~1/64s).
+#   CAMERA_GAIN:     0..255 on most UVC cams. Lower = less noise / darker.
+#   CAMERA_BRIGHTNESS / CONTRAST / SATURATION: device-specific 0..255.
+#   CAMERA_WB_TEMPERATURE: Kelvin, e.g. 4500 indoor, 6500 daylight.
+CAMERA_LOCK_SETTINGS = True
+CAMERA_EXPOSURE = -6
+CAMERA_GAIN = 50
+CAMERA_BRIGHTNESS = 128
+CAMERA_CONTRAST = 128
+CAMERA_SATURATION = 128
+CAMERA_WB_TEMPERATURE = 4500
+
 # Display and matching
 DISPLAY_WINDOW_NAME = "Attendance Verification"
 MATCH_THRESHOLD = 0.01
+
+# Arduino bridge (set to a serial port string to read RFID + joystick from
+# the Arduino sketch in arduino_rfid_bridge.ino instead of the Pi's GPIO/SPI).
+# Examples: "COM10" on Windows, "/dev/ttyACM0" on Linux. Leave as None to use
+# the Pi-native MFRC522 + GPIO buttons.
+ARDUINO_SERIAL_PORT = None
+ARDUINO_BAUD_RATE = 9600
