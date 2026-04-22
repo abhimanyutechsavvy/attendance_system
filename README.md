@@ -49,8 +49,9 @@ This dual-verification flow reduces proxy attendance and improves reliability.
 - `image_processing.py` - ORB image comparison logic
 - `joystick.py` - optional Arduino joystick keyboard bridge
 - `arduino_rfid_serial.py` - serial monitor for the combined Arduino RC522 and joystick bridge
-- `joystick_arduino.ino` - Arduino sketch for joystick serial output
-- `arduino_rfid_bridge.ino` - combined Arduino sketch for RC522 plus joystick over one USB serial link
+- `attendance_system_arduino_all_in_one.ino` - single Arduino sketch for RC522 plus joystick over one USB serial link
+- `joystick_arduino.ino` - older joystick-only sketch
+- `arduino_rfid_bridge.ino` - older combined bridge sketch
 - `web/` - dashboard templates and static assets
 - `pi_setup.sh` - Raspberry Pi setup script
 - `RPI5_DEPLOYMENT_GUIDE.md` - Raspberry Pi deployment notes
@@ -119,12 +120,20 @@ Use the actual device name shown by:
 ls /dev/ttyACM* /dev/ttyUSB*
 ```
 
-## Optional Combined Arduino Bridge
+## Single Arduino Upload
 
-If your Arduino sits between the Raspberry Pi and the hardware, upload `arduino_rfid_bridge.ino` to the Arduino. This sketch sends both:
+If you are using one Arduino for the attendance system, upload `attendance_system_arduino_all_in_one.ino`. This single sketch already includes both RFID and joystick support and sends:
 
 - `RFID:<uid>` when a card is scanned
 - `JOY:x,y,button` for joystick state
+
+Use these pin mappings in the sketch:
+
+- RC522 `SS/SDA` -> `D10`
+- RC522 `RST` -> `D9`
+- Joystick `VRx` -> `A0`
+- Joystick `VRy` -> `A1`
+- Joystick `SW` -> `D2`
 
 You can monitor the combined serial output with:
 
