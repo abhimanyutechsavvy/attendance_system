@@ -199,8 +199,14 @@
                                         </div>
                                         <div class="form-field">
                                             <label for="newStudentImage">Photos</label>
-                                            <input type="file" class="shell-input" id="newStudentImage" accept="image/*" multiple required>
-                                            <p class="helper-text">You can select many photos for the same student.</p>
+                                            <input type="file" class="shell-input" id="newStudentImage" accept="image/*" multiple>
+                                            <p class="helper-text">Upload photos, capture from the Pi camera, or use both.</p>
+                                        </div>
+                                        <div class="registry-capture-box">
+                                            <button type="button" class="action-btn capture-btn" id="captureStudentPhotoBtn">Click Photo For Registry</button>
+                                            <button type="button" class="action-btn retry-btn" id="clearStudentPhotosBtn">Clear Captured Photos</button>
+                                            <div class="camera-status" id="studentPhotoStatus">No camera photos captured yet.</div>
+                                            <div class="registry-photo-strip" id="studentPhotoPreview"></div>
                                         </div>
                                         <button type="submit" class="action-btn primary-btn">Create Student Record</button>
                                     </form>

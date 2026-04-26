@@ -3,6 +3,7 @@ let currentStudentData = null;
 let currentVerificationScore = null;
 let hardwarePollTimer = null;
 let verificationAwaitsDecision = false;
+let registryCapturedImages = [];
 
 document.addEventListener("DOMContentLoaded", () => {
     initializeNavigation();
@@ -34,6 +35,8 @@ function setupEventListeners() {
     document.getElementById("confirmBtn").addEventListener("click", confirmAttendance);
     document.getElementById("retryBtn").addEventListener("click", resetVerification);
     document.getElementById("addStudentForm").addEventListener("submit", handleAddStudent);
+    document.getElementById("captureStudentPhotoBtn").addEventListener("click", captureStudentRegistryPhoto);
+    document.getElementById("clearStudentPhotosBtn").addEventListener("click", clearStudentRegistryPhotos);
 }
 
 function initializeClock() {
@@ -559,13 +562,14 @@ async function handleAddStudent(event) {
     const name = document.getElementById("newStudentName").value.trim();
     const imageFiles = Array.from(document.getElementById("newStudentImage").files);
 
-    if (imageFiles.length === 0) {
-        alert("Please select at least one image");
+    if (imageFiles.length === 0 && registryCapturedImages.length === 0) {
+        alert("Please upload or capture at least one image");
         return;
     }
 
     try {
-        const images = await Promise.all(imageFiles.map(readFileAsDataUrl));
+        const uploadedImages = await Promise.all(imageFiles.map(readFileAsDataUrl));
+        const images = [...registryCapturedImages, ...uploadedImages];
         const response = await fetch("/api/students", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -587,10 +591,56 @@ async function handleAddStudent(event) {
 
         alert(`Student added successfully with ${images.length} photo(s)`);
         document.getElementById("addStudentForm").reset();
+        clearStudentRegistryPhotos();
         loadStudents();
     } catch (error) {
         alert(error.message);
     }
+}
+
+async function captureStudentRegistryPhoto() {
+    const captureBtn = document.getElementById("captureStudentPhotoBtn");
+    const status = document.getElementById("studentPhotoStatus");
+    if (captureBtn.disabled) return;
+
+    captureBtn.disabled = true;
+    captureBtn.textContent = "Capturing...";
+    status.textContent = "Capturing photo from Pi camera...";
+
+    try {
+        const response = await fetch("/api/capture", { method: "POST" });
+        const data = await response.json();
+
+        if (!response.ok || data.error) {
+            throw new Error(data.error || "Capture failed");
+        }
+
+        registryCapturedImages.push(data.image);
+        renderStudentPhotoPreview();
+    } catch (error) {
+        status.textContent = `Capture failed: ${error.message}`;
+    } finally {
+        captureBtn.disabled = false;
+        captureBtn.textContent = "Click Photo For Registry";
+    }
+}
+
+function clearStudentRegistryPhotos() {
+    registryCapturedImages = [];
+    renderStudentPhotoPreview();
+}
+
+function renderStudentPhotoPreview() {
+    const status = document.getElementById("studentPhotoStatus");
+    const preview = document.getElementById("studentPhotoPreview");
+
+    status.textContent = registryCapturedImages.length === 0
+        ? "No camera photos captured yet."
+        : `${registryCapturedImages.length} camera photo(s) ready to save.`;
+
+    preview.innerHTML = registryCapturedImages
+        .map((image, index) => `<img src="${image}" alt="Captured student photo ${index + 1}">`)
+        .join("");
 }
 
 function readFileAsDataUrl(file) {

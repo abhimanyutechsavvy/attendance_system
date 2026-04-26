@@ -658,6 +658,30 @@ label {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.registry-capture-box {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid var(--line);
+}
+
+.registry-photo-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+    gap: 10px;
+}
+
+.registry-photo-strip img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 14px;
+    border: 1px solid rgba(18, 36, 61, 0.12);
+    background: rgba(255, 255, 255, 0.72);
+}
+
 .table-shell {
     overflow-x: auto;
 }
