@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database import AttendanceDatabase
 from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
-from image_processing import compare_images
+from image_processing import compare_with_student_images
 
 # Flask app with correct paths to web folder
 web_dir = os.path.join(os.path.dirname(__file__), 'web')
@@ -53,11 +53,12 @@ def decode_base64_image(image_data: str):
     return image
 
 
-def normalized_image_filename(student_id: str):
+def normalized_image_filename(student_id: str, index: int = 0):
     safe_id = secure_filename(student_id).strip()
     if not safe_id:
         raise ValueError("Invalid student_id for image filename")
-    return f"{safe_id}.jpg"
+    suffix = "" if index == 0 else f"_{index}"
+    return f"{safe_id}{suffix}.jpg"
 
 
 def student_to_dict(student):
@@ -126,15 +127,19 @@ def add_student():
         if not tag_id or not student_id or not name:
             return error_response("tag_id, student_id, and name are required")
 
-        image_data = data.get('image')
-        if image_data:
+        image_data_list = data.get('images') or []
+        if data.get('image'):
+            image_data_list.insert(0, data.get('image'))
+        if not image_data_list:
+            return error_response("At least one student image is required")
+
+        image_filename = normalized_image_filename(student_id)
+        for index, image_data in enumerate(image_data_list):
             image = decode_base64_image(image_data)
-            image_filename = normalized_image_filename(student_id)
-            image_path = Path(STORED_IMAGES_DIR) / image_filename
+            filename = normalized_image_filename(student_id, index)
+            image_path = Path(STORED_IMAGES_DIR) / filename
             if not cv2.imwrite(str(image_path), image):
                 return error_response("Failed to save student image", 500)
-        else:
-            return error_response("Student image is required")
 
         db.add_student(tag_id, student_id, name, image_filename, class_name=class_name, section=section, roll_no=roll_no)
         return jsonify({
@@ -180,19 +185,20 @@ def verify_attendance():
             return jsonify({"error": "Student not found", "match": False}), 404
 
         live_image = decode_base64_image(image_data)
-        stored_image_path = Path(STORED_IMAGES_DIR) / student['stored_image']
-        if not stored_image_path.exists():
-            return error_response(f"Stored image missing for student {student['student_id']}", 404)
-
-        stored_image = cv2.imread(str(stored_image_path))
+        match, score, stored_image, best_path, image_count = compare_with_student_images(
+            live_image,
+            student,
+            Path(STORED_IMAGES_DIR),
+            threshold=MATCH_THRESHOLD,
+        )
         if stored_image is None:
-            return error_response(f"Stored image could not be read for student {student['student_id']}", 500)
-
-        match, score = compare_images(live_image, stored_image, threshold=MATCH_THRESHOLD)
+            return error_response(f"No readable stored images found for student {student['student_id']}", 404)
         
         return jsonify({
             "match": match,
             "score": float(score),
+            "best_image": best_path.name if best_path else "",
+            "photos_checked": image_count,
             "student": {
                 "name": student['name'],
                 "student_id": student['student_id'],

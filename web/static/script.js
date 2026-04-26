@@ -374,7 +374,7 @@ async function verifyImage() {
         <div class="result-content">
             <div class="placeholder-icon">🔍</div>
             <div class="placeholder-title">Verification in progress</div>
-            <div class="placeholder-text">Comparing live image with the stored student record.</div>
+            <div class="placeholder-text">Comparing live image with all stored photos for this student.</div>
         </div>
     `;
 
@@ -557,43 +557,49 @@ async function handleAddStudent(event) {
     const section = document.getElementById("newSection").value.trim();
     const rollNo = document.getElementById("newRollNo").value.trim();
     const name = document.getElementById("newStudentName").value.trim();
-    const imageFile = document.getElementById("newStudentImage").files[0];
+    const imageFiles = Array.from(document.getElementById("newStudentImage").files);
 
-    if (!imageFile) {
-        alert("Please select an image");
+    if (imageFiles.length === 0) {
+        alert("Please select at least one image");
         return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (loadEvent) => {
-        try {
-            const response = await fetch("/api/students", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tag_id: tagId,
-                    student_id: studentId,
-                    class_name: className,
-                    section: section,
-                    roll_no: rollNo,
-                    name: name,
-                    image: loadEvent.target.result,
-                }),
-            });
+    try {
+        const images = await Promise.all(imageFiles.map(readFileAsDataUrl));
+        const response = await fetch("/api/students", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                tag_id: tagId,
+                student_id: studentId,
+                class_name: className,
+                section: section,
+                roll_no: rollNo,
+                name: name,
+                images: images,
+            }),
+        });
 
-            const payload = await response.json();
-            if (!response.ok) {
-                throw new Error(payload.error || "Error adding student");
-            }
-
-            alert("Student added successfully");
-            document.getElementById("addStudentForm").reset();
-            loadStudents();
-        } catch (error) {
-            alert(error.message);
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || "Error adding student");
         }
-    };
-    reader.readAsDataURL(imageFile);
+
+        alert(`Student added successfully with ${images.length} photo(s)`);
+        document.getElementById("addStudentForm").reset();
+        loadStudents();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (loadEvent) => resolve(loadEvent.target.result);
+        reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+        reader.readAsDataURL(file);
+    });
 }
 
 async function loadAttendance() {

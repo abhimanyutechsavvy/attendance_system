@@ -14,7 +14,7 @@ from config import (
 )
 from database import AttendanceDatabase
 from hardware import ButtonController, NFCReader
-from image_processing import compare_images, draw_side_by_side
+from image_processing import compare_with_student_images, draw_side_by_side
 
 
 def create_sample_image(image_path: Path):
@@ -46,16 +46,6 @@ def initialize_database(db: AttendanceDatabase):
     )
     print(f"Database initialized at {db.db_path}")
     print("A sample student has been created for testing.")
-
-
-def load_stored_image(student, base_dir: Path):
-    image_path = base_dir / student["stored_image"]
-    if not image_path.exists():
-        raise FileNotFoundError(f"Stored image not found: {image_path}")
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise RuntimeError(f"Failed to load stored image from {image_path}")
-    return image
 
 
 def main():
@@ -96,21 +86,25 @@ def main():
                 print("No student record found for that tag. Try again.")
                 continue
 
-            try:
-                stored_image = load_stored_image(student, Path(STORED_IMAGES_DIR))
-            except Exception as exc:
-                print(exc)
-                continue
-
             live_image = camera.capture()
             if live_image is None:
                 print("Could not capture live image.")
                 continue
 
-            match, score = compare_images(live_image, stored_image, threshold=MATCH_THRESHOLD)
+            match, score, stored_image, best_path, image_count = compare_with_student_images(
+                live_image,
+                student,
+                Path(STORED_IMAGES_DIR),
+                threshold=MATCH_THRESHOLD,
+            )
+            if stored_image is None:
+                print(f"No readable stored images found for {student['student_id']}.")
+                continue
+
             status_text = "MATCH" if match else "NO MATCH"
             draw_side_by_side(live_image, stored_image, DISPLAY_WINDOW_NAME, status_text=status_text, score=score)
             print(f"Match score: {score:.3f} (threshold {MATCH_THRESHOLD})")
+            print(f"Compared {image_count} stored photo(s). Best photo: {best_path.name}")
 
             if match:
                 print("Good match. Press green to confirm attendance.")

@@ -1,5 +1,9 @@
 import cv2
 import numpy as np
+from pathlib import Path
+
+
+SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
 
 def compare_images(live_image, stored_image, threshold: float = 0.25):
@@ -22,6 +26,50 @@ def compare_images(live_image, stored_image, threshold: float = 0.25):
 
     score = len(good_matches) / max(1, min(len(kp1), len(kp2)))
     return score >= threshold, float(score)
+
+
+def get_student_image_paths(student, base_dir: Path):
+    main_image_path = base_dir / student["stored_image"]
+    student_id = student["student_id"]
+    paths = []
+
+    if main_image_path.exists():
+        paths.append(main_image_path)
+
+    for extension in SUPPORTED_IMAGE_EXTENSIONS:
+        paths.extend(sorted(base_dir.glob(f"{student_id}_*{extension}")))
+
+    unique_paths = []
+    seen = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique_paths.append(path)
+
+    return unique_paths
+
+
+def compare_with_student_images(live_image, student, base_dir: Path, threshold: float = 0.25):
+    image_paths = get_student_image_paths(student, base_dir)
+    best_match = False
+    best_score = 0.0
+    best_image = None
+    best_path = None
+
+    for image_path in image_paths:
+        stored_image = cv2.imread(str(image_path))
+        if stored_image is None:
+            continue
+
+        match, score = compare_images(live_image, stored_image, threshold=threshold)
+        if score > best_score or best_image is None:
+            best_match = match
+            best_score = score
+            best_image = stored_image
+            best_path = image_path
+
+    return best_match, best_score, best_image, best_path, len(image_paths)
 
 
 def draw_side_by_side(image_a, image_b, window_name: str, status_text: str = None, score: float = None):
