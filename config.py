@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import platform
 
@@ -58,10 +59,23 @@ CAMERA_WB_TEMPERATURE = 4500
 DISPLAY_WINDOW_NAME = "Attendance Verification"
 MATCH_THRESHOLD = 0.01
 
-# Arduino bridge (set to a serial port string to read RFID + joystick from
-# the Arduino sketch in attendance_system_arduino_all_in_one.ino instead of
-# the Pi's GPIO/SPI).
-# Examples: "COM10" on Windows, "/dev/ttyACM0" on Linux. Leave as None to use
-# the Pi-native MFRC522 + GPIO buttons.
-ARDUINO_SERIAL_PORT = None
+def detect_arduino_serial_port():
+    configured_port = os.environ.get("ARDUINO_SERIAL_PORT")
+    if configured_port:
+        return configured_port
+
+    if platform.system() != "Linux":
+        return None
+
+    for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*"):
+        ports = sorted(Path("/").glob(pattern.lstrip("/")))
+        if ports:
+            return f"/{ports[0]}"
+
+    return None
+
+
+# Arduino bridge. Set ARDUINO_SERIAL_PORT in the environment to force a port,
+# or let Linux auto-detect common Arduino ports such as /dev/ttyACM0.
+ARDUINO_SERIAL_PORT = detect_arduino_serial_port()
 ARDUINO_BAUD_RATE = 9600
