@@ -2,169 +2,243 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Smart Attendance Kiosk</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="kiosk-shell">
-        <header class="kiosk-topbar">
-            <div>
-                <div class="brand-title">Smart Attendance System</div>
-                <div class="brand-subtitle">RFID + Camera Verification Terminal</div>
+    <header class="topbar">
+        <div class="topbar-title">Attendance System</div>
+        <div class="topbar-status">Dual-Verification Student Terminal</div>
+    </header>
+
+    <main class="app-shell">
+        <section class="window-shell">
+            <div class="window-top">
+                <div class="window-controls">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <div class="hero-row">
+                    <div>
+                        <p class="eyebrow">Final Project Interface</p>
+                        <h1>Smart Attendance Operating Panel</h1>
+                        <p class="hero-text">
+                            The machine activates when the student arrives, verifies identity through NFC and image matching,
+                            and records attendance with a final confirmation receipt.
+                        </p>
+                    </div>
+                    <div class="hero-metrics">
+                        <div class="metric-card">
+                            <span class="metric-label">System</span>
+                            <span class="metric-value" id="heroSystemStatus">Ready</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">Verification</span>
+                            <span class="metric-value">Dual</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">Attendance</span>
+                            <span class="metric-value" id="heroAttendanceCount">Live</span>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="machine-chip">
-                <span class="machine-dot" id="machineDot"></span>
-                <span id="machineStatusText">Sleeping</span>
+
+            <div class="workspace">
+                <aside class="sidebar">
+                    <div class="brand-card">
+                        <strong>Attendance System</strong>
+                        <span>Secure attendance machine for Raspberry Pi 5 with NFC, image verification, and confirmation flow.</span>
+                    </div>
+
+                    <nav class="nav-buttons">
+                        <button class="nav-btn active" data-panel="machinePanel">Machine Flow</button>
+                        <button class="nav-btn" data-panel="studentsPanel">Student Registry</button>
+                        <button class="nav-btn" data-panel="attendancePanel">Attendance Records</button>
+                    </nav>
+
+                    <div class="side-note">
+                        Student arrives, machine activates, ID is scanned, image is verified, and the result is shown as a final attendance receipt.
+                    </div>
+                </aside>
+
+                <section class="content-area">
+                    <div class="panel active" id="machinePanel">
+                        <div class="machine-grid">
+                            <article class="glass-card wide-card">
+                                <div class="card-title blue">Real-Time Machine Status</div>
+                                <div class="card-body">
+                                    <div class="status-banner" id="machineStatusBanner">
+                                        System idle. Waiting for a student to approach and scan the NFC card.
+                                    </div>
+                                    <div class="flow-steps">
+                                        <div class="flow-step" id="step-arrival">
+                                            <div class="step-icon">1</div>
+                                            <div>
+                                                <strong>Student Arrives</strong>
+                                                <p>The machine activates and prepares the verification flow.</p>
+                                            </div>
+                                        </div>
+                                        <div class="flow-step" id="step-scan">
+                                            <div class="step-icon">2</div>
+                                            <div>
+                                                <strong>NFC Card Scan</strong>
+                                                <p>The student taps the ID card to fetch their record.</p>
+                                            </div>
+                                        </div>
+                                        <div class="flow-step" id="step-capture">
+                                            <div class="step-icon">3</div>
+                                            <div>
+                                                <strong>Image Capture</strong>
+                                                <p>The camera captures the ID card for matching.</p>
+                                            </div>
+                                        </div>
+                                        <div class="flow-step" id="step-confirm">
+                                            <div class="step-icon">4</div>
+                                            <div>
+                                                <strong>Attendance Confirmation</strong>
+                                                <p>The system confirms verification and marks attendance.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="glass-card">
+                                <div class="card-title green">NFC Input</div>
+                                <div class="card-body">
+                                    <label for="tagInput">Tap or enter NFC tag ID</label>
+                                    <input type="text" class="shell-input" id="tagInput" placeholder="Enter NFC tag ID or scan" autofocus>
+                                    <p class="helper-text">Sample test tag: <code>123456789012</code></p>
+                                    <div class="student-quick-view" id="studentQuickView">
+                                        No student selected yet.
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="glass-card">
+                                <div class="card-title green">Camera Control</div>
+                                <div class="card-body">
+                                    <div id="cameraContainer" class="camera-card"></div>
+                                </div>
+                            </article>
+
+                            <article class="glass-card">
+                                <div class="card-title amber">Live Preview</div>
+                                <div class="card-body">
+                                    <div class="preview-stage">
+                                        <img id="liveImage" src="" alt="Live capture">
+                                        <div id="livePlaceholder" class="stage-placeholder">
+                                            <div class="placeholder-icon">📷</div>
+                                            <div class="placeholder-title">Awaiting live capture</div>
+                                            <div class="placeholder-text">The captured ID card image will appear here during verification.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="glass-card">
+                                <div class="card-title teal">Verification Result</div>
+                                <div class="card-body">
+                                    <div id="resultContainer" class="result-stage">
+                                        <div class="placeholder-icon">🛡️</div>
+                                        <div class="placeholder-title">Waiting for verification</div>
+                                        <div class="placeholder-text">Once the student scans the card and the image is captured, the match result will appear here.</div>
+                                    </div>
+                                    <div class="action-buttons">
+                                        <button class="action-btn confirm-btn" id="confirmBtn" style="display: none;">Green Button: Confirm Attendance</button>
+                                        <button class="action-btn retry-btn" id="retryBtn" style="display: none;">Red Button: Retry Verification</button>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <article class="glass-card wide-card" id="finalReceiptCard">
+                                <div class="card-title green">Final Attendance Screen</div>
+                                <div class="card-body">
+                                    <div class="final-receipt" id="finalReceipt">
+                                        <div class="receipt-state">Waiting for a successful verification.</div>
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="panel" id="studentsPanel">
+                        <div class="registry-grid">
+                            <article class="glass-card add-student-card">
+                                <div class="card-title blue">Add Student</div>
+                                <div class="card-body">
+                                    <form id="addStudentForm" class="student-form">
+                                        <div class="form-field">
+                                            <label for="newTagId">NFC Tag ID</label>
+                                            <input type="text" class="shell-input" id="newTagId" required>
+                                        </div>
+                                        <div class="form-field">
+                                            <label for="newStudentId">Student ID</label>
+                                            <input type="text" class="shell-input" id="newStudentId" required>
+                                        </div>
+                                        <div class="form-grid-two">
+                                            <div class="form-field">
+                                                <label for="newClassName">Class</label>
+                                                <input type="text" class="shell-input" id="newClassName" placeholder="8" required>
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="newSection">Section</label>
+                                                <input type="text" class="shell-input" id="newSection" placeholder="E" required>
+                                            </div>
+                                        </div>
+                                        <div class="form-field">
+                                            <label for="newRollNo">Roll No.</label>
+                                            <input type="text" class="shell-input" id="newRollNo" placeholder="08" required>
+                                        </div>
+                                        <div class="form-field">
+                                            <label for="newStudentName">Student Name</label>
+                                            <input type="text" class="shell-input" id="newStudentName" required>
+                                        </div>
+                                        <div class="form-field">
+                                            <label for="newStudentImage">Photos</label>
+                                            <input type="file" class="shell-input" id="newStudentImage" accept="image/*" multiple>
+                                            <p class="helper-text">Upload photos, capture from the Pi camera, or use both.</p>
+                                        </div>
+                                        <div class="registry-capture-box">
+                                            <button type="button" class="action-btn capture-btn" id="captureStudentPhotoBtn">Click Photo For Registry</button>
+                                            <button type="button" class="action-btn retry-btn" id="clearStudentPhotosBtn">Clear Captured Photos</button>
+                                            <div class="camera-status" id="studentPhotoStatus">No camera photos captured yet.</div>
+                                            <div class="registry-photo-strip" id="studentPhotoPreview"></div>
+                                        </div>
+                                        <button type="submit" class="action-btn primary-btn">Create Student Record</button>
+                                    </form>
+                                </div>
+                            </article>
+
+                            <article class="glass-card">
+                                <div class="card-title slate">Student Registry</div>
+                                <div class="card-body">
+                                    <div id="studentsList" class="table-shell">Loading students...</div>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+
+                    <div class="panel" id="attendancePanel">
+                        <article class="glass-card">
+                            <div class="card-title green">Attendance Records</div>
+                            <div class="card-body">
+                                <div id="attendanceList" class="table-shell">Loading attendance...</div>
+                            </div>
+                        </article>
+                    </div>
+                </section>
             </div>
-        </header>
+        </section>
+    </main>
 
-        <main class="kiosk-stage" aria-live="polite">
-            <section class="kiosk-screen active" id="sleepScreen">
-                <div class="sleep-layout">
-                    <div class="sleep-copy">
-                        <div class="nfc-emblem">NFC</div>
-                        <p class="eyebrow">Power saving mode</p>
-                        <h1>Tap your ID card to begin</h1>
-                        <p>The camera and verification display wake only after a valid card scan.</p>
-                        <input class="manual-tag-input" id="tagInput" type="text" placeholder="Manual tag entry" autocomplete="off">
-                    </div>
-                    <div class="reader-visual">
-                        <div class="reader-rings">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                            <strong>Ready</strong>
-                        </div>
-                        <div class="reader-caption">RFID reader standing by</div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="kiosk-screen" id="cameraScreen">
-                <div class="verify-layout">
-                    <div class="camera-frame">
-                        <img id="liveImage" src="" alt="Live camera capture">
-                        <div class="camera-placeholder" id="livePlaceholder">
-                            <div class="camera-lens"></div>
-                            <strong>Camera waking</strong>
-                            <span>Preparing capture from Raspberry Pi camera</span>
-                        </div>
-                        <div class="frame-overlay">
-                            <span id="cameraModeLabel">Camera On</span>
-                            <span id="cameraStatus">Initializing</span>
-                        </div>
-                    </div>
-                    <aside class="student-panel">
-                        <p class="eyebrow">Student verification</p>
-                        <h2 id="studentName">Reading card</h2>
-                        <div class="student-facts" id="studentQuickView">
-                            Waiting for RFID data.
-                        </div>
-                        <div class="progress-track"><span></span></div>
-                    </aside>
-                </div>
-            </section>
-
-            <section class="kiosk-screen" id="confirmScreen">
-                <div class="verify-layout">
-                    <div class="camera-frame confirmed">
-                        <img id="confirmImage" src="" alt="Verified camera capture">
-                        <div class="frame-overlay">
-                            <span>Match Detected</span>
-                            <span id="matchScoreLabel">Score ready</span>
-                        </div>
-                    </div>
-                    <aside class="student-panel">
-                        <p class="eyebrow">Final confirmation</p>
-                        <h2>Confirm attendance</h2>
-                        <div id="resultContainer" class="result-panel">
-                            Waiting for verification result.
-                        </div>
-                        <div class="kiosk-actions">
-                            <button class="primary-action" id="confirmBtn">Confirm Attendance</button>
-                            <button class="danger-action" id="retryBtn">Retry Verification</button>
-                        </div>
-                    </aside>
-                </div>
-            </section>
-
-            <section class="kiosk-screen" id="markedScreen">
-                <div class="marked-panel">
-                    <div class="success-orb">OK</div>
-                    <p class="eyebrow">Attendance saved</p>
-                    <h1>Marked present</h1>
-                    <p>The terminal will return to sleep mode for the next student.</p>
-                    <div class="receipt-grid" id="finalReceipt">
-                        Waiting for receipt.
-                    </div>
-                </div>
-            </section>
-
-            <section class="kiosk-screen" id="errorScreen">
-                <div class="marked-panel error-panel">
-                    <div class="success-orb error">!</div>
-                    <p class="eyebrow">Attention needed</p>
-                    <h1 id="errorTitle">Something went wrong</h1>
-                    <p id="errorMessage">Please retry the attendance process.</p>
-                    <button class="primary-action" id="errorResetBtn">Return to Sleep</button>
-                </div>
-            </section>
-        </main>
+    <div class="clock-widget">
+        <div class="clock-time" id="clockTime">00:00:00</div>
+        <div class="clock-date" id="clockDate">Loading date</div>
     </div>
-
-    <div class="admin-hotspot" id="adminHotspot" aria-hidden="true"></div>
-
-    <aside class="admin-drawer" id="adminDrawer" aria-label="Admin portal">
-        <div class="admin-head">
-            <div>
-                <p class="eyebrow">Protected area</p>
-                <h2>Admin Portal</h2>
-            </div>
-            <button class="icon-button" id="closeAdminBtn" title="Close admin portal">X</button>
-        </div>
-
-        <div class="admin-login-panel" id="loginPanel">
-            <label for="adminPassword">Admin password</label>
-            <input id="adminPassword" type="password" placeholder="Enter password">
-            <button id="adminLoginBtn">Unlock Portal</button>
-            <p id="adminMessage">Drag from the top-right edge to access this portal.</p>
-        </div>
-
-        <div class="admin-content" id="adminContent">
-            <div class="admin-tabs">
-                <button class="admin-tab active" data-admin-panel="studentsAdminPanel">Student Records</button>
-                <button class="admin-tab" data-admin-panel="attendanceAdminPanel">Attendance Records</button>
-            </div>
-
-            <section class="admin-panel active" id="studentsAdminPanel">
-                <div class="registry-grid">
-                    <form id="addStudentForm" class="admin-form">
-                        <h3>Add Student</h3>
-                        <input id="newTagId" type="text" placeholder="NFC Tag ID" required>
-                        <input id="newStudentId" type="text" placeholder="Student ID" required>
-                        <input id="newClassName" type="text" placeholder="Class" required>
-                        <input id="newSection" type="text" placeholder="Section" required>
-                        <input id="newRollNo" type="text" placeholder="Roll No." required>
-                        <input id="newStudentName" type="text" placeholder="Student Name" required>
-                        <input id="newStudentImage" type="file" accept="image/*" multiple>
-                        <div class="registry-capture-box">
-                            <button type="button" id="captureStudentPhotoBtn">Click Photo For Registry</button>
-                            <button type="button" id="clearStudentPhotosBtn">Clear Captured Photos</button>
-                            <p id="studentPhotoStatus">No camera photos captured yet.</p>
-                            <div class="registry-photo-strip" id="studentPhotoPreview"></div>
-                        </div>
-                        <button type="submit">Create Student Record</button>
-                    </form>
-                    <div class="table-shell" id="studentsList">Loading students...</div>
-                </div>
-            </section>
-
-            <section class="admin-panel" id="attendanceAdminPanel">
-                <div class="table-shell" id="attendanceList">Loading attendance...</div>
-            </section>
-        </div>
-    </aside>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

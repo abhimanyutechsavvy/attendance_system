@@ -3,94 +3,125 @@ let currentStudentData = null;
 let currentVerificationScore = null;
 let hardwarePollTimer = null;
 let verificationAwaitsDecision = false;
-let sleepTimer = null;
 let registryCapturedImages = [];
 
-const ADMIN_PASSWORD = "springdalespusa@abhimanyu";
-
 document.addEventListener("DOMContentLoaded", () => {
-    setupKioskEvents();
-    setupAdminPortal();
+    initializeNavigation();
+    initializeCamera();
+    initializeClock();
     loadStudents();
     loadAttendance();
-    renderSleepState();
+    setupEventListeners();
+    renderIdleState();
     startHardwarePolling();
 });
 
-function setupKioskEvents() {
-    const tagInput = document.getElementById("tagInput");
-    tagInput.addEventListener("keydown", async (event) => {
-        if (event.key !== "Enter") return;
-        const tag = tagInput.value.trim();
-        if (!tag) return;
-        tagInput.value = "";
-        await processTag(tag);
-    });
+function initializeNavigation() {
+    const navButtons = document.querySelectorAll(".nav-btn");
+    const panels = document.querySelectorAll(".panel");
 
+    navButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            navButtons.forEach((item) => item.classList.remove("active"));
+            panels.forEach((panel) => panel.classList.remove("active"));
+            button.classList.add("active");
+            document.getElementById(button.dataset.panel).classList.add("active");
+        });
+    });
+}
+
+function setupEventListeners() {
+    document.getElementById("tagInput").addEventListener("keypress", handleTagInput);
     document.getElementById("confirmBtn").addEventListener("click", confirmAttendance);
-    document.getElementById("retryBtn").addEventListener("click", retryVerification);
-    document.getElementById("errorResetBtn").addEventListener("click", renderSleepState);
+    document.getElementById("retryBtn").addEventListener("click", resetVerification);
     document.getElementById("addStudentForm").addEventListener("submit", handleAddStudent);
     document.getElementById("captureStudentPhotoBtn").addEventListener("click", captureStudentRegistryPhoto);
     document.getElementById("clearStudentPhotosBtn").addEventListener("click", clearStudentRegistryPhotos);
 }
 
-function showScreen(screenId) {
-    document.querySelectorAll(".kiosk-screen").forEach((screen) => {
-        screen.classList.toggle("active", screen.id === screenId);
-    });
+function initializeClock() {
+    const updateClock = () => {
+        const now = new Date();
+        document.getElementById("clockTime").textContent = now.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+        });
+        document.getElementById("clockDate").textContent = now.toLocaleDateString([], {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+        });
+    };
+
+    updateClock();
+    setInterval(updateClock, 1000);
 }
 
-function setMachineStatus(text, tone = "ready") {
-    document.getElementById("machineStatusText").textContent = text;
-    const dot = document.getElementById("machineDot");
-    dot.classList.remove("warn", "error");
-    if (tone === "warn") dot.classList.add("warn");
-    if (tone === "error") dot.classList.add("error");
+function initializeCamera() {
+    document.getElementById("cameraContainer").innerHTML = `
+        <div class="camera-shell">
+            <div class="stage-placeholder">
+                <div class="placeholder-icon">📷</div>
+                <div class="placeholder-title">Camera ready</div>
+                <div class="placeholder-text">Use the Pi camera to capture the student ID card for verification.</div>
+            </div>
+            <button class="action-btn capture-btn" id="captureBtn">Capture From Pi Camera</button>
+            <div class="camera-status" id="cameraStatus">Camera ready</div>
+        </div>
+    `;
+
+    document.getElementById("captureBtn").addEventListener("click", captureImage);
+
+    setTimeout(() => {
+        warmUpCamera();
+    }, 500);
 }
 
-function clearSleepTimer() {
-    if (sleepTimer) {
-        clearTimeout(sleepTimer);
-        sleepTimer = null;
+async function warmUpCamera() {
+    try {
+        await fetch("/api/capture", { method: "POST" });
+    } catch (error) {
+        console.log("Camera warm-up skipped");
     }
 }
 
-function renderSleepState() {
-    clearSleepTimer();
-    currentCapturedImage = null;
-    currentStudentData = null;
-    currentVerificationScore = null;
+function renderIdleState() {
     verificationAwaitsDecision = false;
-    document.getElementById("liveImage").removeAttribute("src");
-    document.getElementById("confirmImage").removeAttribute("src");
-    document.querySelectorAll(".camera-frame").forEach((frame) => frame.classList.remove("has-image"));
-    document.getElementById("studentName").textContent = "Reading card";
-    document.getElementById("studentQuickView").textContent = "Waiting for RFID data.";
-    document.getElementById("resultContainer").textContent = "Waiting for verification result.";
-    document.getElementById("finalReceipt").textContent = "Waiting for receipt.";
-    setMachineStatus("Sleeping");
-    showScreen("sleepScreen");
-    document.getElementById("tagInput").focus();
+    setMachineBanner("System idle. Waiting for a student to approach and scan the NFC card.");
+    setHeroSystemStatus("Ready");
+    setStepState("arrival", "active");
+    setStepState("scan", "idle");
+    setStepState("capture", "idle");
+    setStepState("confirm", "idle");
+    document.getElementById("studentQuickView").innerHTML = "No student selected yet.";
+    document.getElementById("finalReceipt").innerHTML = `<div class="receipt-state">Waiting for a successful verification.</div>`;
 }
 
-async function startHardwarePolling() {
-    if (hardwarePollTimer) clearInterval(hardwarePollTimer);
+function startHardwarePolling() {
+    if (hardwarePollTimer) {
+        clearInterval(hardwarePollTimer);
+    }
 
     hardwarePollTimer = setInterval(async () => {
         try {
             const response = await fetch("/api/hardware/poll");
             const data = await response.json();
-            if (!response.ok) return;
+            if (!response.ok) {
+                return;
+            }
 
-            if (data.tag_id && !currentStudentData) {
+            if (data.tag_id) {
+                const tagInput = document.getElementById("tagInput");
+                tagInput.value = data.tag_id;
                 await processTag(data.tag_id);
+                tagInput.value = "";
             }
 
             if (verificationAwaitsDecision && data.decision === "confirm") {
                 await confirmAttendance();
             } else if (verificationAwaitsDecision && data.decision === "retry") {
-                retryVerification();
+                resetVerification();
             }
         } catch (error) {
             console.log("Hardware poll unavailable", error);
@@ -98,51 +129,219 @@ async function startHardwarePolling() {
     }, 500);
 }
 
-async function processTag(tag) {
-    clearSleepTimer();
-    setMachineStatus("Reading card", "warn");
-    showScreen("cameraScreen");
-    document.getElementById("cameraModeLabel").textContent = "RFID Detected";
-    document.getElementById("cameraStatus").textContent = "Searching record";
+function setMachineBanner(message) {
+    document.getElementById("machineStatusBanner").textContent = message;
+}
 
+function setHeroSystemStatus(status) {
+    document.getElementById("heroSystemStatus").textContent = status;
+}
+
+function setStepState(stepName, state) {
+    const element = document.getElementById(`step-${stepName}`);
+    if (!element) return;
+    element.classList.remove("active", "completed");
+    if (state === "active") element.classList.add("active");
+    if (state === "completed") element.classList.add("completed");
+}
+
+function renderStudentQuickView(student) {
+    document.getElementById("studentQuickView").innerHTML = `
+        <strong>${escapeHtml(student.name)}</strong><br>
+        Student ID: ${escapeHtml(student.student_id)}<br>
+        Class ${escapeHtml(student.class_name || "-")} • Section ${escapeHtml(student.section || "-")} • Roll No. ${escapeHtml(student.roll_no || "-")}
+    `;
+}
+
+function renderVerificationResult(match, data) {
+    const resultContainer = document.getElementById("resultContainer");
+    const scorePercent = `${(data.score * 100).toFixed(2)}%`;
+
+    if (match) {
+        resultContainer.innerHTML = `
+            <div class="result-content">
+                <div class="result-pill success">Match Detected</div>
+                <div class="match-score">${scorePercent}</div>
+                <div class="placeholder-title">Student Verified Successfully</div>
+                <div class="placeholder-text">The stored record matches the live image. Attendance is ready to be confirmed.</div>
+                <div class="detail-grid">
+                    <div class="detail-box">
+                        <span class="detail-label">Student Name</span>
+                        <span class="detail-value">${escapeHtml(data.student.name)}</span>
+                    </div>
+                    <div class="detail-box">
+                        <span class="detail-label">Student ID</span>
+                        <span class="detail-value">${escapeHtml(data.student.student_id)}</span>
+                    </div>
+                    <div class="detail-box">
+                        <span class="detail-label">Class</span>
+                        <span class="detail-value">${escapeHtml(data.student.class_name || "-")}</span>
+                    </div>
+                    <div class="detail-box">
+                        <span class="detail-label">Section</span>
+                        <span class="detail-value">${escapeHtml(data.student.section || "-")}</span>
+                    </div>
+                    <div class="detail-box">
+                        <span class="detail-label">Roll No.</span>
+                        <span class="detail-value">${escapeHtml(data.student.roll_no || "-")}</span>
+                    </div>
+                    <div class="detail-box">
+                        <span class="detail-label">Verification Score</span>
+                        <span class="detail-value">${scorePercent}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        resultContainer.innerHTML = `
+            <div class="result-content">
+                <div class="result-pill error">No Match</div>
+                <div class="match-score">${scorePercent}</div>
+                <div class="placeholder-title">Verification failed</div>
+                <div class="placeholder-text">The live image did not match the stored record. Retry with better positioning or lighting.</div>
+            </div>
+        `;
+    }
+}
+
+function renderFinalReceipt(student, score) {
+    const scorePercent = `${(score * 100).toFixed(2)}%`;
+    document.getElementById("finalReceipt").innerHTML = `
+        <div class="receipt-content">
+            <div class="receipt-heading">ATTENDANCE MARKED</div>
+            <div class="receipt-subtext">
+                The student has completed NFC validation and image verification successfully. Attendance has been recorded as present.
+            </div>
+            <div class="receipt-grid">
+                <div class="receipt-item">
+                    <span class="receipt-label">Student Name</span>
+                    <span class="receipt-value">${escapeHtml(student.name)}</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Class</span>
+                    <span class="receipt-value">${escapeHtml(student.class_name || "-")}</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Section</span>
+                    <span class="receipt-value">${escapeHtml(student.section || "-")}</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Roll No.</span>
+                    <span class="receipt-value">${escapeHtml(student.roll_no || "-")}</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Student ID</span>
+                    <span class="receipt-value">${escapeHtml(student.student_id)}</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Status</span>
+                    <span class="receipt-value">Marked Present</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Verification</span>
+                    <span class="receipt-value">Dual Verified</span>
+                </div>
+                <div class="receipt-item">
+                    <span class="receipt-label">Match Score</span>
+                    <span class="receipt-value">${scorePercent}</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function handleTagInput(event) {
+    if (event.key !== "Enter") return;
+
+    const tag = event.target.value.trim();
+    if (!tag) return;
+
+    await processTag(tag);
+    event.target.value = "";
+}
+
+async function processTag(tag) {
     try {
+        setHeroSystemStatus("Active");
+        setMachineBanner("Student detected. Searching for NFC record...");
+        setStepState("arrival", "completed");
+        setStepState("scan", "active");
+
         const response = await fetch("/api/students");
         const students = await response.json();
-        if (!response.ok) throw new Error(students.error || "Failed to load students");
-
         const student = students.find((item) => item.tag_id === tag);
+
         if (!student) {
-            showError("Unknown card", "No student record was found for this RFID tag.");
+            setMachineBanner("Unknown card detected. No student record found.");
+            showErrorResult("Student not found");
+            event.target.value = "";
             return;
         }
 
         currentStudentData = student;
         renderStudentQuickView(student);
-        setMachineStatus("Camera waking", "warn");
-        document.getElementById("cameraModeLabel").textContent = "Camera On";
-        document.getElementById("cameraStatus").textContent = "Capturing";
-        await autoCaptureForVerification();
+        setMachineBanner(`Student identified: ${student.name}. Activating camera verification...`);
+        setStepState("scan", "completed");
+        setStepState("capture", "active");
+
+        setTimeout(() => {
+            autoCaptureForVerification();
+        }, 1200);
     } catch (error) {
-        showError("RFID error", error.message);
+        showErrorResult(`Error: ${error.message}`);
     }
 }
 
-function renderStudentQuickView(student) {
-    document.getElementById("studentName").textContent = student.name;
-    document.getElementById("studentQuickView").innerHTML = `
-        <div class="fact-row"><span>Student ID</span><strong>${escapeHtml(student.student_id)}</strong></div>
-        <div class="fact-row"><span>Class</span><strong>${escapeHtml(student.class_name || "-")}</strong></div>
-        <div class="fact-row"><span>Section</span><strong>${escapeHtml(student.section || "-")}</strong></div>
-        <div class="fact-row"><span>Roll No.</span><strong>${escapeHtml(student.roll_no || "-")}</strong></div>
-        <div class="fact-row"><span>RFID</span><strong>${escapeHtml(student.tag_id)}</strong></div>
-    `;
+async function captureImage() {
+    const captureBtn = document.getElementById("captureBtn");
+    const statusDiv = document.getElementById("cameraStatus");
+    if (captureBtn.disabled) return;
+
+    captureBtn.disabled = true;
+    captureBtn.textContent = "Capturing...";
+    statusDiv.textContent = "Initializing camera...";
+    setMachineBanner("Camera is preparing to capture the student ID card...");
+
+    setTimeout(async () => {
+        statusDiv.textContent = "Capturing image...";
+
+        try {
+            const response = await fetch("/api/capture", { method: "POST" });
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(data.error || "Capture failed");
+            }
+
+            applyCapturedImage(data.image);
+            statusDiv.textContent = "Image captured successfully";
+            setMachineBanner("Live image captured. Running image verification...");
+
+            if (currentStudentData) {
+                await verifyImage();
+            }
+        } catch (error) {
+            statusDiv.textContent = `Capture failed: ${error.message}`;
+            setMachineBanner("Camera capture failed. Please retry.");
+        } finally {
+            captureBtn.disabled = false;
+            captureBtn.textContent = "Capture From Pi Camera";
+        }
+    }, 1200);
 }
 
 async function autoCaptureForVerification() {
     if (!currentStudentData) return;
 
+    const captureBtn = document.getElementById("captureBtn");
+    const statusDiv = document.getElementById("cameraStatus");
+    captureBtn.disabled = true;
+    captureBtn.textContent = "Auto-capturing...";
+    statusDiv.textContent = "Preparing automatic capture...";
+
     try {
-        await new Promise((resolve) => setTimeout(resolve, 650));
+        await new Promise((resolve) => setTimeout(resolve, 900));
+
         const response = await fetch("/api/capture", { method: "POST" });
         const data = await response.json();
 
@@ -151,10 +350,14 @@ async function autoCaptureForVerification() {
         }
 
         applyCapturedImage(data.image);
-        document.getElementById("cameraStatus").textContent = "Verifying";
+        statusDiv.textContent = "Image captured successfully";
         await verifyImage();
     } catch (error) {
-        showError("Camera error", error.message);
+        statusDiv.textContent = `Auto-capture failed: ${error.message}`;
+        setMachineBanner("Automatic capture failed. Please capture again manually.");
+    } finally {
+        captureBtn.disabled = false;
+        captureBtn.textContent = "Capture From Pi Camera";
     }
 }
 
@@ -162,14 +365,21 @@ function applyCapturedImage(imageData) {
     currentCapturedImage = imageData;
     currentVerificationScore = null;
     const liveImage = document.getElementById("liveImage");
-    const confirmImage = document.getElementById("confirmImage");
-    liveImage.src = imageData;
-    confirmImage.src = imageData;
-    document.querySelectorAll(".camera-frame").forEach((frame) => frame.classList.add("has-image"));
+    liveImage.src = currentCapturedImage;
+    liveImage.style.display = "block";
+    document.getElementById("livePlaceholder").style.display = "none";
 }
 
 async function verifyImage() {
     if (!currentCapturedImage || !currentStudentData) return;
+
+    document.getElementById("resultContainer").innerHTML = `
+        <div class="result-content">
+            <div class="placeholder-icon">🔍</div>
+            <div class="placeholder-title">Verification in progress</div>
+            <div class="placeholder-text">Comparing live image with all stored photos for this student.</div>
+        </div>
+    `;
 
     try {
         const response = await fetch("/api/verify", {
@@ -182,41 +392,36 @@ async function verifyImage() {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Verification failed");
+
+        if (!response.ok) {
+            throw new Error(data.error || "Verification failed");
+        }
 
         currentVerificationScore = data.score;
-        currentStudentData = { ...currentStudentData, ...data.student };
+        currentStudentData = {
+            ...currentStudentData,
+            ...data.student,
+        };
+
+        renderStudentQuickView(currentStudentData);
+        renderVerificationResult(data.match, data);
 
         if (data.match) {
-            renderVerificationResult(data);
+            setMachineBanner("Verification successful. Press the green button to mark attendance.");
+            setStepState("capture", "completed");
+            setStepState("confirm", "active");
             verificationAwaitsDecision = true;
-            setMachineStatus("Confirm attendance", "warn");
-            showScreen("confirmScreen");
+            document.getElementById("confirmBtn").style.display = "block";
+            document.getElementById("retryBtn").style.display = "block";
         } else {
+            setMachineBanner("Verification failed. Press the red button to retry.");
             verificationAwaitsDecision = true;
-            document.getElementById("matchScoreLabel").textContent = `Score ${(data.score * 100).toFixed(2)}%`;
-            document.getElementById("resultContainer").innerHTML = `
-                <strong>No Match</strong><br>
-                The live image did not match the stored record. Retry the verification.
-            `;
-            setMachineStatus("Retry needed", "error");
-            showScreen("confirmScreen");
+            document.getElementById("confirmBtn").style.display = "none";
+            document.getElementById("retryBtn").style.display = "block";
         }
     } catch (error) {
-        showError("Verification error", error.message);
+        showErrorResult(`Verification error: ${error.message}`);
     }
-}
-
-function renderVerificationResult(data) {
-    const scorePercent = `${(data.score * 100).toFixed(2)}%`;
-    const photosChecked = data.photos_checked ? `<br>Photos Checked: ${escapeHtml(data.photos_checked)}` : "";
-    document.getElementById("matchScoreLabel").textContent = `Score ${scorePercent}`;
-    document.getElementById("resultContainer").innerHTML = `
-        <strong>${escapeHtml(data.student.name)}</strong><br>
-        Student ID: ${escapeHtml(data.student.student_id)}<br>
-        Match Score: ${scorePercent}<br>
-        Dual verification completed successfully.${photosChecked}
-    `;
 }
 
 async function confirmAttendance() {
@@ -233,120 +438,79 @@ async function confirmAttendance() {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to confirm attendance");
+        if (!response.ok) {
+            throw new Error(data.error || "Failed to confirm attendance");
+        }
 
-        verificationAwaitsDecision = false;
-        setMachineStatus("Attendance saved");
+        setMachineBanner("Attendance recorded successfully.");
+        setHeroSystemStatus("Marked");
+        setStepState("confirm", "completed");
         renderFinalReceipt(currentStudentData, currentVerificationScore ?? 0);
-        showScreen("markedScreen");
+        verificationAwaitsDecision = false;
+        document.getElementById("resultContainer").innerHTML = `
+            <div class="result-content">
+                <div class="result-pill success">Attendance Confirmed</div>
+                <div class="match-score">${((currentVerificationScore ?? 0) * 100).toFixed(2)}%</div>
+                <div class="placeholder-title">Student marked present</div>
+                <div class="placeholder-text">The machine has completed the full attendance flow successfully.</div>
+            </div>
+        `;
+        document.getElementById("confirmBtn").style.display = "none";
+        document.getElementById("retryBtn").style.display = "none";
         loadAttendance();
 
-        sleepTimer = setTimeout(renderSleepState, 4200);
+        setTimeout(() => {
+            resetVerification();
+        }, 5000);
     } catch (error) {
-        showError("Attendance error", error.message);
+        const message = error.message.includes("already marked")
+            ? "Attendance was already marked for this student today."
+            : `Error marking attendance: ${error.message}`;
+        showErrorResult(message);
     }
 }
 
-function retryVerification() {
-    verificationAwaitsDecision = false;
-    if (!currentStudentData) {
-        renderSleepState();
-        return;
-    }
-    setMachineStatus("Retrying", "warn");
-    showScreen("cameraScreen");
-    setTimeout(autoCaptureForVerification, 450);
-}
-
-function renderFinalReceipt(student, score) {
-    const scorePercent = `${(score * 100).toFixed(2)}%`;
-    document.getElementById("finalReceipt").innerHTML = `
-        <div class="receipt-item"><span class="receipt-label">Student</span><strong class="receipt-value">${escapeHtml(student.name)}</strong></div>
-        <div class="receipt-item"><span class="receipt-label">Student ID</span><strong class="receipt-value">${escapeHtml(student.student_id)}</strong></div>
-        <div class="receipt-item"><span class="receipt-label">Class</span><strong class="receipt-value">${escapeHtml(student.class_name || "-")}</strong></div>
-        <div class="receipt-item"><span class="receipt-label">Status</span><strong class="receipt-value">Present</strong></div>
-        <div class="receipt-item"><span class="receipt-label">Verification</span><strong class="receipt-value">Dual Verified</strong></div>
-        <div class="receipt-item"><span class="receipt-label">Score</span><strong class="receipt-value">${scorePercent}</strong></div>
+function resetVerification() {
+    currentCapturedImage = null;
+    currentStudentData = null;
+    currentVerificationScore = null;
+    document.getElementById("liveImage").style.display = "none";
+    document.getElementById("livePlaceholder").style.display = "block";
+    document.getElementById("resultContainer").innerHTML = `
+        <div class="result-content">
+            <div class="placeholder-icon">🛡️</div>
+            <div class="placeholder-title">Waiting for verification</div>
+            <div class="placeholder-text">Once the student scans the card and the image is captured, the match result will appear here.</div>
+        </div>
     `;
+    document.getElementById("confirmBtn").style.display = "none";
+    document.getElementById("retryBtn").style.display = "none";
+    document.getElementById("tagInput").value = "";
+    document.getElementById("tagInput").focus();
+    renderIdleState();
 }
 
-function showError(title, message) {
-    verificationAwaitsDecision = false;
-    setMachineStatus("Attention needed", "error");
-    document.getElementById("errorTitle").textContent = title;
-    document.getElementById("errorMessage").textContent = message || "Please retry the attendance process.";
-    showScreen("errorScreen");
-}
-
-function setupAdminPortal() {
-    const hotspot = document.getElementById("adminHotspot");
-    const drawer = document.getElementById("adminDrawer");
-    const closeButton = document.getElementById("closeAdminBtn");
-    const passwordInput = document.getElementById("adminPassword");
-    const loginButton = document.getElementById("adminLoginBtn");
-    const adminMessage = document.getElementById("adminMessage");
-    const adminContent = document.getElementById("adminContent");
-    let dragStart = null;
-
-    hotspot.addEventListener("pointerdown", (event) => {
-        dragStart = { x: event.clientX, y: event.clientY };
-        hotspot.setPointerCapture(event.pointerId);
-    });
-
-    hotspot.addEventListener("pointermove", (event) => {
-        if (!dragStart) return;
-        const movedLeft = dragStart.x - event.clientX;
-        const movedDown = event.clientY - dragStart.y;
-        if (movedLeft > 80 && movedDown > 20) {
-            drawer.classList.add("open");
-            passwordInput.focus();
-            dragStart = null;
-        }
-    });
-
-    hotspot.addEventListener("pointerup", () => {
-        dragStart = null;
-    });
-
-    closeButton.addEventListener("click", () => {
-        drawer.classList.remove("open");
-    });
-
-    function unlockAdmin() {
-        if (passwordInput.value === ADMIN_PASSWORD) {
-            adminContent.classList.add("unlocked");
-            adminMessage.textContent = "Admin portal unlocked.";
-            passwordInput.value = "";
-            loadStudents();
-            loadAttendance();
-        } else {
-            adminMessage.textContent = "Incorrect password.";
-        }
-    }
-
-    loginButton.addEventListener("click", unlockAdmin);
-    passwordInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") unlockAdmin();
-    });
-
-    document.querySelectorAll(".admin-tab").forEach((button) => {
-        button.addEventListener("click", () => {
-            document.querySelectorAll(".admin-tab").forEach((item) => item.classList.remove("active"));
-            document.querySelectorAll(".admin-panel").forEach((panel) => panel.classList.remove("active"));
-            button.classList.add("active");
-            document.getElementById(button.dataset.adminPanel).classList.add("active");
-        });
-    });
+function showErrorResult(message) {
+    setHeroSystemStatus("Attention");
+    document.getElementById("resultContainer").innerHTML = `
+        <div class="result-content">
+            <div class="result-pill error">Error</div>
+            <div class="placeholder-title">${escapeHtml(message)}</div>
+            <div class="placeholder-text">Please retry the attendance process.</div>
+        </div>
+    `;
 }
 
 async function loadStudents() {
     try {
         const response = await fetch("/api/students");
         const students = await response.json();
-        if (!response.ok) throw new Error(students.error || "Failed to load students");
+        if (!response.ok) {
+            throw new Error(students.error || "Failed to load students");
+        }
 
         if (students.length === 0) {
-            document.getElementById("studentsList").innerHTML = `<p class="empty-state">No students added yet.</p>`;
+            document.getElementById("studentsList").innerHTML = `<p class="helper-text">No students added yet.</p>`;
             return;
         }
 
@@ -383,14 +547,21 @@ async function loadStudents() {
         html += "</tbody></table>";
         document.getElementById("studentsList").innerHTML = html;
     } catch (error) {
-        document.getElementById("studentsList").innerHTML = `<p class="empty-state">Error loading students: ${escapeHtml(error.message)}</p>`;
+        document.getElementById("studentsList").innerHTML = `<p class="helper-text">Error loading students: ${escapeHtml(error.message)}</p>`;
     }
 }
 
 async function handleAddStudent(event) {
     event.preventDefault();
 
+    const tagId = document.getElementById("newTagId").value.trim();
+    const studentId = document.getElementById("newStudentId").value.trim();
+    const className = document.getElementById("newClassName").value.trim();
+    const section = document.getElementById("newSection").value.trim();
+    const rollNo = document.getElementById("newRollNo").value.trim();
+    const name = document.getElementById("newStudentName").value.trim();
     const imageFiles = Array.from(document.getElementById("newStudentImage").files);
+
     if (imageFiles.length === 0 && registryCapturedImages.length === 0) {
         alert("Please upload or capture at least one image");
         return;
@@ -403,18 +574,23 @@ async function handleAddStudent(event) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                tag_id: document.getElementById("newTagId").value.trim(),
-                student_id: document.getElementById("newStudentId").value.trim(),
-                class_name: document.getElementById("newClassName").value.trim(),
-                section: document.getElementById("newSection").value.trim(),
-                roll_no: document.getElementById("newRollNo").value.trim(),
-                name: document.getElementById("newStudentName").value.trim(),
-                images,
+                tag_id: tagId,
+                student_id: studentId,
+                class_name: className,
+                section: section,
+                roll_no: rollNo,
+                name: name,
+                images: images,
             }),
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Error adding student");
-        event.target.reset();
+
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || "Error adding student");
+        }
+
+        alert(`Student added successfully with ${images.length} photo(s)`);
+        document.getElementById("addStudentForm").reset();
         clearStudentRegistryPhotos();
         loadStudents();
     } catch (error) {
@@ -434,7 +610,11 @@ async function captureStudentRegistryPhoto() {
     try {
         const response = await fetch("/api/capture", { method: "POST" });
         const data = await response.json();
-        if (!response.ok || data.error) throw new Error(data.error || "Capture failed");
+
+        if (!response.ok || data.error) {
+            throw new Error(data.error || "Capture failed");
+        }
+
         registryCapturedImages.push(data.image);
         renderStudentPhotoPreview();
     } catch (error) {
@@ -453,9 +633,11 @@ function clearStudentRegistryPhotos() {
 function renderStudentPhotoPreview() {
     const status = document.getElementById("studentPhotoStatus");
     const preview = document.getElementById("studentPhotoPreview");
+
     status.textContent = registryCapturedImages.length === 0
         ? "No camera photos captured yet."
         : `${registryCapturedImages.length} camera photo(s) ready to save.`;
+
     preview.innerHTML = registryCapturedImages
         .map((image, index) => `<img src="${image}" alt="Captured student photo ${index + 1}">`)
         .join("");
@@ -464,7 +646,7 @@ function renderStudentPhotoPreview() {
 function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (event) => resolve(event.target.result);
+        reader.onload = (loadEvent) => resolve(loadEvent.target.result);
         reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
         reader.readAsDataURL(file);
     });
@@ -474,10 +656,14 @@ async function loadAttendance() {
     try {
         const response = await fetch("/api/attendance");
         const logs = await response.json();
-        if (!response.ok) throw new Error(logs.error || "Failed to load attendance");
+        if (!response.ok) {
+            throw new Error(logs.error || "Failed to load attendance");
+        }
+
+        document.getElementById("heroAttendanceCount").textContent = `${logs.length} logs`;
 
         if (logs.length === 0) {
-            document.getElementById("attendanceList").innerHTML = `<p class="empty-state">No attendance records yet.</p>`;
+            document.getElementById("attendanceList").innerHTML = `<p class="helper-text">No attendance records yet.</p>`;
             return;
         }
 
@@ -498,9 +684,9 @@ async function loadAttendance() {
             const time = new Date(log.timestamp).toLocaleString();
             html += `
                 <tr>
-                    <td><strong>${escapeHtml(log.name)}</strong><br><span>${escapeHtml(log.student_id)}</span></td>
+                    <td><strong>${escapeHtml(log.name)}</strong><br><span class="muted-inline">${escapeHtml(log.student_id)}</span></td>
                     <td>${escapeHtml(time)}</td>
-                    <td><span class="badge">${escapeHtml(log.status)}</span></td>
+                    <td><span class="badge badge-present">${escapeHtml(log.status)}</span></td>
                     <td>${escapeHtml(log.notes || "-")}</td>
                 </tr>
             `;
@@ -509,7 +695,7 @@ async function loadAttendance() {
         html += "</tbody></table>";
         document.getElementById("attendanceList").innerHTML = html;
     } catch (error) {
-        document.getElementById("attendanceList").innerHTML = `<p class="empty-state">Error loading attendance: ${escapeHtml(error.message)}</p>`;
+        document.getElementById("attendanceList").innerHTML = `<p class="helper-text">Error loading attendance: ${escapeHtml(error.message)}</p>`;
     }
 }
 
