@@ -2,9 +2,9 @@
 # This file contains Pi 5 optimized settings
 
 # Camera settings optimized for Pi 5
-CAMERA_WIDTH = 1280
-CAMERA_HEIGHT = 720
-CAMERA_FPS = 30
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 480
+CAMERA_FPS = 15
 
 # GPIO pins for Pi 5 (BCM numbering)
 BUTTON_CONFIRM_PIN = 17

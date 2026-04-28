@@ -59,6 +59,7 @@ CAMERA_WB_TEMPERATURE = 4500
 # Display and matching
 DISPLAY_WINDOW_NAME = "Attendance Verification"
 MATCH_THRESHOLD = 0.55
+VIEWFINDER_FPS = 8
 
 # Verification safety gate. ORB feature matching can accidentally match
 # background objects, so require a detectable face in the live capture before
@@ -74,7 +75,8 @@ DEBUG_MATCH_SCORES = True
 YUNET_FACE_DETECTION_MODEL = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
 SFACE_RECOGNITION_MODEL = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
 YUNET_SCORE_THRESHOLD = 0.55
-SFACE_COSINE_THRESHOLD = 0.363
+SFACE_REQUIRED_FOR_MATCH = True
+SFACE_COSINE_THRESHOLD = 0.50
 
 def detect_arduino_serial_port():
     configured_port = os.environ.get("ARDUINO_SERIAL_PORT")

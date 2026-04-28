@@ -14,7 +14,7 @@ import base64
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database import AttendanceDatabase
-from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
+from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD, VIEWFINDER_FPS
 from image_processing import annotate_face, annotate_viewfinder, compare_with_student_images, encode_image_data_url
 
 # Flask app with correct paths to web folder
@@ -27,8 +27,8 @@ CORS(app)
 db = AttendanceDatabase(DB_PATH)
 Path(STORED_IMAGES_DIR).mkdir(parents=True, exist_ok=True)
 arduino_bridge = None
-camera_lock = threading.Lock()
-shared_camera = None
+camera_feed = None
+camera_feed_lock = threading.Lock()
 
 if ARDUINO_SERIAL_PORT:
     try:
@@ -83,19 +83,79 @@ def get_request_json():
     return request.get_json(silent=True) or {}
 
 
-def get_shared_camera():
-    global shared_camera
-    if shared_camera is None:
-        from camera import CameraManager
-        from config import CAMERA_INDEX
-        shared_camera = CameraManager(CAMERA_INDEX)
-    return shared_camera
+class CameraFeed:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.camera = None
+        self.thread = None
+        self.latest_frame = None
+        self.latest_error = None
+        self.running = False
+
+    def start(self):
+        with self.lock:
+            if self.thread is not None and self.thread.is_alive():
+                return
+            self.running = True
+            self.thread = threading.Thread(target=self._run, name="camera-feed", daemon=True)
+            self.thread.start()
+
+    def _open_camera(self):
+        if self.camera is None:
+            from camera import CameraManager
+            from config import CAMERA_INDEX
+            self.camera = CameraManager(CAMERA_INDEX)
+        return self.camera
+
+    def _run(self):
+        delay = 1.0 / max(1, VIEWFINDER_FPS)
+        while self.running:
+            started = time.time()
+            try:
+                camera = self._open_camera()
+                frame = camera.read_live_frame()
+                if frame is not None:
+                    with self.lock:
+                        self.latest_frame = frame.copy()
+                        self.latest_error = None
+                else:
+                    time.sleep(0.05)
+            except Exception as exc:
+                print(f"[camera-feed] {exc}")
+                with self.lock:
+                    self.latest_error = str(exc)
+                self.camera = None
+                time.sleep(0.5)
+
+            elapsed = time.time() - started
+            if elapsed < delay:
+                time.sleep(delay - elapsed)
+
+    def get_frame(self, timeout: float = 3.0):
+        self.start()
+        deadline = time.time() + timeout
+        while True:
+            with self.lock:
+                if self.latest_frame is not None:
+                    return self.latest_frame.copy()
+                latest_error = self.latest_error
+
+            if time.time() >= deadline:
+                raise RuntimeError(latest_error or "Camera feed has not produced a frame yet")
+            time.sleep(0.05)
+
+
+def get_camera_feed():
+    global camera_feed
+    with camera_feed_lock:
+        if camera_feed is None:
+            camera_feed = CameraFeed()
+        camera_feed.start()
+        return camera_feed
 
 
 def capture_shared_frame():
-    with camera_lock:
-        camera = get_shared_camera()
-        return camera.capture()
+    return get_camera_feed().get_frame()
 
 
 def encode_jpeg_frame(frame):
@@ -336,4 +396,4 @@ if __name__ == '__main__':
     # For development on laptop, use 127.0.0.1
     import platform
     host = '0.0.0.0' if platform.system() == 'Linux' else '127.0.0.1'
-    app.run(debug=False, host=host, port=5000)
+    app.run(debug=False, host=host, port=5000, threaded=True)

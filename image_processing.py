@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import threading
 from pathlib import Path
 
 from config import (
@@ -12,6 +13,7 @@ from config import (
     MIN_FACE_SIZE_RATIO,
     REQUIRE_FACE_FOR_MATCH,
     SFACE_COSINE_THRESHOLD,
+    SFACE_REQUIRED_FOR_MATCH,
     SFACE_RECOGNITION_MODEL,
     YUNET_FACE_DETECTION_MODEL,
     YUNET_SCORE_THRESHOLD,
@@ -19,6 +21,9 @@ from config import (
 
 
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+_yunet_detector = None
+_yunet_input_size = None
+_yunet_lock = threading.Lock()
 _sface_recognizer = None
 
 
@@ -31,15 +36,22 @@ def detect_faces_yunet(image):
         return []
 
     height, width = image.shape[:2]
-    detector = cv2.FaceDetectorYN.create(
-        str(YUNET_FACE_DETECTION_MODEL),
-        "",
-        (width, height),
-        score_threshold=YUNET_SCORE_THRESHOLD,
-        nms_threshold=0.3,
-        top_k=5000,
-    )
-    _, faces = detector.detect(image)
+    global _yunet_detector, _yunet_input_size
+
+    with _yunet_lock:
+        if _yunet_detector is None or _yunet_input_size != (width, height):
+            _yunet_detector = cv2.FaceDetectorYN.create(
+                str(YUNET_FACE_DETECTION_MODEL),
+                "",
+                (width, height),
+                score_threshold=YUNET_SCORE_THRESHOLD,
+                nms_threshold=0.3,
+                top_k=5000,
+            )
+            _yunet_input_size = (width, height)
+
+        _, faces = _yunet_detector.detect(image)
+
     if faces is None:
         return []
     return [face for face in faces]
@@ -278,6 +290,10 @@ def compare_face_regions(live_image, stored_image):
     sface_result = compare_sface(live_image, stored_image)
     if sface_result is not None:
         return sface_result
+    if SFACE_REQUIRED_FOR_MATCH:
+        if DEBUG_MATCH_SCORES:
+            print("[match] rejected: SFace match is required but no SFace comparison was available")
+        return False, 0.0
 
     live_face, live_source = best_face_crop(live_image, allow_center_fallback=False)
     stored_face, stored_source = best_face_crop(stored_image, allow_center_fallback=True)
@@ -369,7 +385,7 @@ def annotate_face(image, name: str = "", match: bool = False):
     x = max(0, x)
     y = max(0, y)
     color = (0, 255, 0) if match else (0, 165, 255)
-    label = name.strip() if name else "FACE"
+    label = name.strip() if match and name else "NOT MATCHED"
     cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
 
     label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
@@ -390,7 +406,7 @@ def annotate_viewfinder(image, name: str = ""):
     x = max(0, x)
     y = max(0, y)
     color = (0, 255, 0)
-    label = name.strip() if name else "FACE DETECTED"
+    label = "FACE IN FRAME"
 
     cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
     label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)

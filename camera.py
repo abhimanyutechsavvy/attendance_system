@@ -158,27 +158,33 @@ class CameraManager:
             self.camera.grab()
             time.sleep(0.03)
 
+    def read_live_frame(self):
+        """Read one frame without flushing buffers; suitable for continuous preview."""
+        ret, frame = self.camera.read()
+        if not ret:
+            return None
+
+        if self.using_manual_settings and _frame_looks_corrupted(frame):
+            print("[cam] Captured frame looks overexposed or color-skewed; falling back to auto settings.")
+            enable_camera_auto_settings(self.camera)
+            self.using_manual_settings = False
+            return None
+
+        return frame
+
     def capture(self):
         print("Capturing live image from camera...")
         import time
 
-        # Flush stale buffered frames so we get one taken with the locked
-        # settings rather than a leftover from before initialization.
+        # Flush stale buffered frames for manual one-shot captures. The web
+        # app uses read_live_frame() through a background feed instead.
         for _ in range(5):
             self.camera.grab()
             time.sleep(0.03)
 
         for attempt in range(3):
-            ret, frame = self.camera.read()
-            if ret:
-                if self.using_manual_settings and _frame_looks_corrupted(frame):
-                    print("[cam] Captured frame looks overexposed or color-skewed; falling back to auto settings.")
-                    enable_camera_auto_settings(self.camera)
-                    self.using_manual_settings = False
-                    for _ in range(10):
-                        self.camera.grab()
-                        time.sleep(0.03)
-                    continue
+            frame = self.read_live_frame()
+            if frame is not None:
                 return frame
             print("Camera capture failed, retrying...")
             time.sleep(0.2)

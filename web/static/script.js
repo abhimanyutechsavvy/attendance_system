@@ -291,7 +291,7 @@ async function processTag(tag) {
 
         currentStudentData = student;
         renderStudentQuickView(student);
-        startViewfinder(student.name);
+        startViewfinder();
         setMachineBanner(`Student identified: ${student.name}. Activating camera verification...`);
         setStepState("scan", "completed");
         setStepState("capture", "active");
