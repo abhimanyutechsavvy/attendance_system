@@ -402,6 +402,9 @@ async function verifyImage() {
             ...currentStudentData,
             ...data.student,
         };
+        if (data.annotated_image) {
+            applyCapturedImage(data.annotated_image);
+        }
 
         renderStudentQuickView(currentStudentData);
         renderVerificationResult(data.match, data);

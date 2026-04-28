@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database import AttendanceDatabase
 from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
-from image_processing import compare_with_student_images
+from image_processing import annotate_face, compare_with_student_images, encode_image_data_url
 
 # Flask app with correct paths to web folder
 web_dir = os.path.join(os.path.dirname(__file__), 'web')
@@ -193,12 +193,15 @@ def verify_attendance():
         )
         if stored_image is None:
             return error_response(f"No readable stored images found for student {student['student_id']}", 404)
+
+        annotated_image = annotate_face(live_image, name=student["name"], match=match)
         
         return jsonify({
             "match": match,
             "score": float(score),
             "best_image": best_path.name if best_path else "",
             "photos_checked": image_count,
+            "annotated_image": encode_image_data_url(annotated_image),
             "student": {
                 "name": student['name'],
                 "student_id": student['student_id'],

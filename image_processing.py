@@ -11,15 +11,102 @@ from config import (
     MIN_CROP_DETAIL_STDDEV,
     MIN_FACE_SIZE_RATIO,
     REQUIRE_FACE_FOR_MATCH,
+    SFACE_COSINE_THRESHOLD,
+    SFACE_RECOGNITION_MODEL,
+    YUNET_FACE_DETECTION_MODEL,
+    YUNET_SCORE_THRESHOLD,
 )
 
 
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+_sface_recognizer = None
+
+
+def _model_exists(path):
+    return path is not None and Path(path).exists()
+
+
+def detect_faces_yunet(image):
+    if image is None or not _model_exists(YUNET_FACE_DETECTION_MODEL):
+        return []
+
+    height, width = image.shape[:2]
+    detector = cv2.FaceDetectorYN.create(
+        str(YUNET_FACE_DETECTION_MODEL),
+        "",
+        (width, height),
+        score_threshold=YUNET_SCORE_THRESHOLD,
+        nms_threshold=0.3,
+        top_k=5000,
+    )
+    _, faces = detector.detect(image)
+    if faces is None:
+        return []
+    return [face for face in faces]
+
+
+def largest_yunet_face(image):
+    faces = detect_faces_yunet(image)
+    if not faces:
+        return None
+    return max(faces, key=lambda face: face[2] * face[3])
+
+
+def get_sface_recognizer():
+    global _sface_recognizer
+    if _sface_recognizer is not None:
+        return _sface_recognizer
+    if not _model_exists(SFACE_RECOGNITION_MODEL):
+        return None
+    _sface_recognizer = cv2.FaceRecognizerSF.create(str(SFACE_RECOGNITION_MODEL), "")
+    return _sface_recognizer
+
+
+def sface_feature(image, face):
+    recognizer = get_sface_recognizer()
+    if recognizer is None or face is None:
+        return None
+    try:
+        aligned = recognizer.alignCrop(image, face)
+        return recognizer.feature(aligned)
+    except Exception as exc:
+        if DEBUG_MATCH_SCORES:
+            print(f"[match] SFace feature failed: {exc}")
+        return None
+
+
+def compare_sface(live_image, stored_image):
+    live_face = largest_yunet_face(live_image)
+    stored_face = largest_yunet_face(stored_image)
+    if live_face is None:
+        if DEBUG_MATCH_SCORES:
+            print("[match] rejected: YuNet found no live face")
+        return None
+    if stored_face is None:
+        if DEBUG_MATCH_SCORES:
+            print("[match] SFace skipped: YuNet found no stored face")
+        return None
+
+    live_feature = sface_feature(live_image, live_face)
+    stored_feature = sface_feature(stored_image, stored_face)
+    recognizer = get_sface_recognizer()
+    if recognizer is None or live_feature is None or stored_feature is None:
+        return None
+
+    cosine_score = float(recognizer.match(live_feature, stored_feature, cv2.FaceRecognizerSF_FR_COSINE))
+    match = cosine_score >= SFACE_COSINE_THRESHOLD
+    if DEBUG_MATCH_SCORES:
+        print(f"[match] sface_cosine={cosine_score:.3f} threshold={SFACE_COSINE_THRESHOLD:.3f} match={match}")
+    return match, cosine_score
 
 
 def detect_faces(image):
     if image is None:
         return []
+
+    yunet_faces = detect_faces_yunet(image)
+    if yunet_faces:
+        return [(int(face[0]), int(face[1]), int(face[2]), int(face[3])) for face in yunet_faces]
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
@@ -188,6 +275,10 @@ def orb_face_score(face_a, face_b):
 
 
 def compare_face_regions(live_image, stored_image):
+    sface_result = compare_sface(live_image, stored_image)
+    if sface_result is not None:
+        return sface_result
+
     live_face, live_source = best_face_crop(live_image, allow_center_fallback=False)
     stored_face, stored_source = best_face_crop(stored_image, allow_center_fallback=True)
     if live_face is None:
@@ -254,6 +345,39 @@ def compare_images(live_image, stored_image, threshold: float = 0.25):
 
     score = len(good_matches) / max(1, min(len(kp1), len(kp2)))
     return score >= threshold, float(score)
+
+
+def encode_image_data_url(image):
+    ok, buffer = cv2.imencode(".jpg", image)
+    if not ok:
+        return ""
+    import base64
+    return "data:image/jpeg;base64," + base64.b64encode(buffer).decode("utf-8")
+
+
+def annotate_face(image, name: str = "", match: bool = False):
+    annotated = image.copy()
+    face = largest_face(annotated)
+    if face is None:
+        label = "NO FACE DETECTED"
+        color = (0, 0, 255)
+        cv2.rectangle(annotated, (12, 12), (330, 58), color, cv2.FILLED)
+        cv2.putText(annotated, label, (22, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+        return annotated
+
+    x, y, w, h = [int(v) for v in face]
+    x = max(0, x)
+    y = max(0, y)
+    color = (0, 255, 0) if match else (0, 165, 255)
+    label = name.strip() if name else "FACE"
+    cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
+
+    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+    label_w = max(label_size[0] + 18, 90)
+    label_y1 = max(0, y - 36)
+    cv2.rectangle(annotated, (x, label_y1), (x + label_w, label_y1 + 34), color, cv2.FILLED)
+    cv2.putText(annotated, label, (x + 8, label_y1 + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2, cv2.LINE_AA)
+    return annotated
 
 
 def get_student_image_paths(student, base_dir: Path):

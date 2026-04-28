@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 STORED_IMAGES_DIR = DATA_DIR / "stored_ids"
 DB_PATH = DATA_DIR / "attendance.db"
+MODELS_DIR = PROJECT_ROOT / "models"
 
 # Load Pi 5 specific config if running on Linux (Raspberry Pi)
 if platform.system() == 'Linux':
@@ -70,6 +71,10 @@ FACE_ORB_THRESHOLD = 0.0
 FACE_COMBINED_THRESHOLD = 0.38
 MIN_CROP_DETAIL_STDDEV = 18.0
 DEBUG_MATCH_SCORES = True
+YUNET_FACE_DETECTION_MODEL = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
+SFACE_RECOGNITION_MODEL = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
+YUNET_SCORE_THRESHOLD = 0.55
+SFACE_COSINE_THRESHOLD = 0.363
 
 def detect_arduino_serial_port():
     configured_port = os.environ.get("ARDUINO_SERIAL_PORT")
