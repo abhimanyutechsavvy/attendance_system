@@ -3,10 +3,12 @@ import numpy as np
 from pathlib import Path
 
 from config import (
+    DEBUG_MATCH_SCORES,
     FACE_COMBINED_THRESHOLD,
     FACE_HISTOGRAM_THRESHOLD,
     FACE_ORB_THRESHOLD,
     FACE_STRUCTURAL_THRESHOLD,
+    MIN_CROP_DETAIL_STDDEV,
     MIN_FACE_SIZE_RATIO,
     REQUIRE_FACE_FOR_MATCH,
 )
@@ -61,6 +63,37 @@ def crop_face(image, padding_ratio: float = 0.28):
     if x2 <= x1 or y2 <= y1:
         return None
     return image[y1:y2, x1:x2]
+
+
+def center_face_candidate(image):
+    """Fallback for webcams where Haar misses faces due to lighting/angle."""
+    if image is None:
+        return None
+
+    height, width = image.shape[:2]
+    crop_w = int(width * 0.52)
+    crop_h = int(height * 0.68)
+    x1 = max(0, (width - crop_w) // 2)
+    y1 = max(0, int(height * 0.12))
+    x2 = min(width, x1 + crop_w)
+    y2 = min(height, y1 + crop_h)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return image[y1:y2, x1:x2]
+
+
+def best_face_crop(image):
+    face = crop_face(image)
+    if face is not None:
+        return face, "detected"
+    return center_face_candidate(image), "center"
+
+
+def has_enough_detail(face):
+    if face is None:
+        return False
+    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    return float(gray.std()) >= MIN_CROP_DETAIL_STDDEV
 
 
 def normalize_face(face):
@@ -123,9 +156,11 @@ def orb_face_score(face_a, face_b):
 
 
 def compare_face_regions(live_image, stored_image):
-    live_face = crop_face(live_image)
-    stored_face = crop_face(stored_image)
-    if live_face is None or stored_face is None:
+    live_face, live_source = best_face_crop(live_image)
+    stored_face, stored_source = best_face_crop(stored_image)
+    if not has_enough_detail(live_face) or not has_enough_detail(stored_face):
+        if DEBUG_MATCH_SCORES:
+            print("[match] rejected: not enough detail in live/stored crop")
         return False, 0.0
 
     structural_score = structural_similarity_score(live_face, stored_face)
@@ -146,6 +181,16 @@ def compare_face_regions(live_image, stored_image):
         and orb_passes
         and combined_score >= FACE_COMBINED_THRESHOLD
     )
+    if DEBUG_MATCH_SCORES:
+        print(
+            "[match] "
+            f"live={live_source} stored={stored_source} "
+            f"structural={structural_score:.3f} "
+            f"hist={histogram_score:.3f} "
+            f"orb={orb_score:.3f} "
+            f"combined={combined_score:.3f} "
+            f"match={match}"
+        )
     return match, float(combined_score)
 
 
