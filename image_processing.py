@@ -137,10 +137,13 @@ def compare_face_regions(live_image, stored_image):
         + min(orb_score / 0.25, 1.0) * 0.20
     )
 
+    # ORB can be weak on smooth/low-light face crops, so use it as a bonus
+    # signal instead of a hard requirement unless the threshold is raised.
+    orb_passes = FACE_ORB_THRESHOLD <= 0 or orb_score >= FACE_ORB_THRESHOLD
     match = (
         structural_score >= FACE_STRUCTURAL_THRESHOLD
         and histogram_score >= FACE_HISTOGRAM_THRESHOLD
-        and orb_score >= FACE_ORB_THRESHOLD
+        and orb_passes
         and combined_score >= FACE_COMBINED_THRESHOLD
     )
     return match, float(combined_score)

@@ -63,11 +63,11 @@ MATCH_THRESHOLD = 0.55
 # background objects, so require a detectable face in the live capture before
 # accepting any image match.
 REQUIRE_FACE_FOR_MATCH = True
-MIN_FACE_SIZE_RATIO = 0.08
-FACE_STRUCTURAL_THRESHOLD = 0.58
-FACE_HISTOGRAM_THRESHOLD = 0.55
-FACE_ORB_THRESHOLD = 0.08
-FACE_COMBINED_THRESHOLD = 0.60
+MIN_FACE_SIZE_RATIO = 0.05
+FACE_STRUCTURAL_THRESHOLD = 0.42
+FACE_HISTOGRAM_THRESHOLD = 0.35
+FACE_ORB_THRESHOLD = 0.0
+FACE_COMBINED_THRESHOLD = 0.48
 
 def detect_arduino_serial_port():
     configured_port = os.environ.get("ARDUINO_SERIAL_PORT")
