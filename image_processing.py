@@ -2,7 +2,14 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-from config import MIN_FACE_SIZE_RATIO, REQUIRE_FACE_FOR_MATCH
+from config import (
+    FACE_COMBINED_THRESHOLD,
+    FACE_HISTOGRAM_THRESHOLD,
+    FACE_ORB_THRESHOLD,
+    FACE_STRUCTURAL_THRESHOLD,
+    MIN_FACE_SIZE_RATIO,
+    REQUIRE_FACE_FOR_MATCH,
+)
 
 
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
@@ -32,12 +39,119 @@ def has_detectable_face(image):
     return len(detect_faces(image)) > 0
 
 
+def largest_face(image):
+    faces = detect_faces(image)
+    if not faces:
+        return None
+    return max(faces, key=lambda face: face[2] * face[3])
+
+
+def crop_face(image, padding_ratio: float = 0.28):
+    face = largest_face(image)
+    if face is None:
+        return None
+
+    x, y, w, h = face
+    pad_x = int(w * padding_ratio)
+    pad_y = int(h * padding_ratio)
+    x1 = max(0, x - pad_x)
+    y1 = max(0, y - pad_y)
+    x2 = min(image.shape[1], x + w + pad_x)
+    y2 = min(image.shape[0], y + h + pad_y)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return image[y1:y2, x1:x2]
+
+
+def normalize_face(face):
+    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+    gray = cv2.resize(gray, (160, 160), interpolation=cv2.INTER_AREA)
+    gray = cv2.equalizeHist(gray)
+    return gray
+
+
+def structural_similarity_score(face_a, face_b):
+    a = normalize_face(face_a).astype(np.float32)
+    b = normalize_face(face_b).astype(np.float32)
+
+    # Lightweight SSIM-style score without adding extra dependencies.
+    c1 = 6.5025
+    c2 = 58.5225
+    mu_a = cv2.GaussianBlur(a, (11, 11), 1.5)
+    mu_b = cv2.GaussianBlur(b, (11, 11), 1.5)
+    sigma_a = cv2.GaussianBlur(a * a, (11, 11), 1.5) - mu_a * mu_a
+    sigma_b = cv2.GaussianBlur(b * b, (11, 11), 1.5) - mu_b * mu_b
+    sigma_ab = cv2.GaussianBlur(a * b, (11, 11), 1.5) - mu_a * mu_b
+
+    numerator = (2 * mu_a * mu_b + c1) * (2 * sigma_ab + c2)
+    denominator = (mu_a * mu_a + mu_b * mu_b + c1) * (sigma_a + sigma_b + c2)
+    score_map = numerator / np.maximum(denominator, 1e-6)
+    return float(np.clip(score_map.mean(), 0.0, 1.0))
+
+
+def histogram_similarity_score(face_a, face_b):
+    a = normalize_face(face_a)
+    b = normalize_face(face_b)
+    hist_a = cv2.calcHist([a], [0], None, [64], [0, 256])
+    hist_b = cv2.calcHist([b], [0], None, [64], [0, 256])
+    cv2.normalize(hist_a, hist_a)
+    cv2.normalize(hist_b, hist_b)
+    return float(np.clip(cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL), 0.0, 1.0))
+
+
+def orb_face_score(face_a, face_b):
+    a = normalize_face(face_a)
+    b = normalize_face(face_b)
+    orb = cv2.ORB_create(800)
+    kp1, des1 = orb.detectAndCompute(a, None)
+    kp2, des2 = orb.detectAndCompute(b, None)
+
+    if des1 is None or des2 is None or len(kp1) < 12 or len(kp2) < 12:
+        return 0.0
+
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    matches = matcher.knnMatch(des1, des2, k=2)
+    good_matches = []
+    for pair in matches:
+        if len(pair) != 2:
+            continue
+        m, n = pair
+        if m.distance < 0.72 * n.distance:
+            good_matches.append(m)
+
+    return float(len(good_matches) / max(1, min(len(kp1), len(kp2))))
+
+
+def compare_face_regions(live_image, stored_image):
+    live_face = crop_face(live_image)
+    stored_face = crop_face(stored_image)
+    if live_face is None or stored_face is None:
+        return False, 0.0
+
+    structural_score = structural_similarity_score(live_face, stored_face)
+    histogram_score = histogram_similarity_score(live_face, stored_face)
+    orb_score = orb_face_score(live_face, stored_face)
+    combined_score = (
+        structural_score * 0.50
+        + histogram_score * 0.30
+        + min(orb_score / 0.25, 1.0) * 0.20
+    )
+
+    match = (
+        structural_score >= FACE_STRUCTURAL_THRESHOLD
+        and histogram_score >= FACE_HISTOGRAM_THRESHOLD
+        and orb_score >= FACE_ORB_THRESHOLD
+        and combined_score >= FACE_COMBINED_THRESHOLD
+    )
+    return match, float(combined_score)
+
+
 def compare_images(live_image, stored_image, threshold: float = 0.25):
     if live_image is None or stored_image is None:
         return False, 0.0
 
-    if REQUIRE_FACE_FOR_MATCH and not has_detectable_face(live_image):
-        return False, 0.0
+    if REQUIRE_FACE_FOR_MATCH:
+        return compare_face_regions(live_image, stored_image)
 
     live_gray = cv2.cvtColor(live_image, cv2.COLOR_BGR2GRAY)
     stored_gray = cv2.cvtColor(stored_image, cv2.COLOR_BGR2GRAY)

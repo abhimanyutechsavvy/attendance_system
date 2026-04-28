@@ -57,13 +57,17 @@ CAMERA_WB_TEMPERATURE = 4500
 
 # Display and matching
 DISPLAY_WINDOW_NAME = "Attendance Verification"
-MATCH_THRESHOLD = 0.01
+MATCH_THRESHOLD = 0.55
 
 # Verification safety gate. ORB feature matching can accidentally match
 # background objects, so require a detectable face in the live capture before
 # accepting any image match.
 REQUIRE_FACE_FOR_MATCH = True
 MIN_FACE_SIZE_RATIO = 0.08
+FACE_STRUCTURAL_THRESHOLD = 0.58
+FACE_HISTOGRAM_THRESHOLD = 0.55
+FACE_ORB_THRESHOLD = 0.08
+FACE_COMBINED_THRESHOLD = 0.60
 
 def detect_arduino_serial_port():
     configured_port = os.environ.get("ARDUINO_SERIAL_PORT")
