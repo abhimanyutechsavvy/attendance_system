@@ -63,7 +63,7 @@ MATCH_THRESHOLD = 0.55
 # background objects, so require a detectable face in the live capture before
 # accepting any image match.
 REQUIRE_FACE_FOR_MATCH = True
-MIN_FACE_SIZE_RATIO = 0.05
+MIN_FACE_SIZE_RATIO = 0.04
 FACE_STRUCTURAL_THRESHOLD = 0.42
 FACE_HISTOGRAM_THRESHOLD = 0.35
 FACE_ORB_THRESHOLD = 0.0

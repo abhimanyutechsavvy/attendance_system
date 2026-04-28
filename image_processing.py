@@ -22,19 +22,49 @@ def detect_faces(image):
         return []
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-    if face_cascade.empty():
-        return []
+    gray = cv2.equalizeHist(gray)
 
     min_side = max(24, int(min(gray.shape[:2]) * MIN_FACE_SIZE_RATIO))
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(min_side, min_side),
-    )
-    return list(faces)
+    cascade_names = [
+        "haarcascade_frontalface_default.xml",
+        "haarcascade_frontalface_alt2.xml",
+        "haarcascade_frontalface_alt.xml",
+        "haarcascade_profileface.xml",
+    ]
+
+    detected = []
+    for cascade_name in cascade_names:
+        cascade_path = cv2.data.haarcascades + cascade_name
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        if face_cascade.empty():
+            continue
+
+        for min_neighbors in (4, 3, 2):
+            faces = face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.05,
+                minNeighbors=min_neighbors,
+                minSize=(min_side, min_side),
+            )
+            detected.extend(list(faces))
+            if detected:
+                return detected
+
+        if cascade_name == "haarcascade_profileface.xml":
+            flipped = cv2.flip(gray, 1)
+            faces = face_cascade.detectMultiScale(
+                flipped,
+                scaleFactor=1.05,
+                minNeighbors=3,
+                minSize=(min_side, min_side),
+            )
+            width = gray.shape[1]
+            for x, y, w, h in faces:
+                detected.append((width - x - w, y, w, h))
+            if detected:
+                return detected
+
+    return detected
 
 
 def has_detectable_face(image):
@@ -82,11 +112,13 @@ def center_face_candidate(image):
     return image[y1:y2, x1:x2]
 
 
-def best_face_crop(image):
+def best_face_crop(image, allow_center_fallback: bool = False):
     face = crop_face(image)
     if face is not None:
         return face, "detected"
-    return center_face_candidate(image), "center"
+    if allow_center_fallback:
+        return center_face_candidate(image), "center"
+    return None, "missing"
 
 
 def has_enough_detail(face):
@@ -156,8 +188,13 @@ def orb_face_score(face_a, face_b):
 
 
 def compare_face_regions(live_image, stored_image):
-    live_face, live_source = best_face_crop(live_image)
-    stored_face, stored_source = best_face_crop(stored_image)
+    live_face, live_source = best_face_crop(live_image, allow_center_fallback=False)
+    stored_face, stored_source = best_face_crop(stored_image, allow_center_fallback=True)
+    if live_face is None:
+        if DEBUG_MATCH_SCORES:
+            print("[match] rejected: no live face detected")
+        return False, 0.0
+
     if not has_enough_detail(live_face) or not has_enough_detail(stored_face):
         if DEBUG_MATCH_SCORES:
             print("[match] rejected: not enough detail in live/stored crop")
