@@ -380,6 +380,27 @@ def annotate_face(image, name: str = "", match: bool = False):
     return annotated
 
 
+def annotate_viewfinder(image, name: str = ""):
+    annotated = image.copy()
+    face = largest_face(annotated)
+    if face is None:
+        return annotated
+
+    x, y, w, h = [int(v) for v in face]
+    x = max(0, x)
+    y = max(0, y)
+    color = (0, 255, 0)
+    label = name.strip() if name else "FACE DETECTED"
+
+    cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 3)
+    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+    label_w = max(label_size[0] + 18, 120)
+    label_y1 = max(0, y - 36)
+    cv2.rectangle(annotated, (x, label_y1), (x + label_w, label_y1 + 34), color, cv2.FILLED)
+    cv2.putText(annotated, label, (x + 8, label_y1 + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2, cv2.LINE_AA)
+    return annotated
+
+
 def get_student_image_paths(student, base_dir: Path):
     main_image_path = base_dir / student["stored_image"]
     student_id = student["student_id"]

@@ -2,9 +2,11 @@ import os
 import sys
 import cv2
 import numpy as np
+import threading
+import time
 from pathlib import Path
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, Response, render_template, request, jsonify, send_file
 from flask_cors import CORS
 import base64
 
@@ -13,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database import AttendanceDatabase
 from config import ARDUINO_BAUD_RATE, ARDUINO_SERIAL_PORT, DB_PATH, STORED_IMAGES_DIR, MATCH_THRESHOLD
-from image_processing import annotate_face, compare_with_student_images, encode_image_data_url
+from image_processing import annotate_face, annotate_viewfinder, compare_with_student_images, encode_image_data_url
 
 # Flask app with correct paths to web folder
 web_dir = os.path.join(os.path.dirname(__file__), 'web')
@@ -25,6 +27,8 @@ CORS(app)
 db = AttendanceDatabase(DB_PATH)
 Path(STORED_IMAGES_DIR).mkdir(parents=True, exist_ok=True)
 arduino_bridge = None
+camera_lock = threading.Lock()
+shared_camera = None
 
 if ARDUINO_SERIAL_PORT:
     try:
@@ -78,6 +82,48 @@ def student_to_dict(student):
 def get_request_json():
     return request.get_json(silent=True) or {}
 
+
+def get_shared_camera():
+    global shared_camera
+    if shared_camera is None:
+        from camera import CameraManager
+        from config import CAMERA_INDEX
+        shared_camera = CameraManager(CAMERA_INDEX)
+    return shared_camera
+
+
+def capture_shared_frame():
+    with camera_lock:
+        camera = get_shared_camera()
+        return camera.capture()
+
+
+def encode_jpeg_frame(frame):
+    ok, buffer = cv2.imencode(".jpg", frame)
+    if not ok:
+        return None
+    return buffer.tobytes()
+
+
+def viewfinder_frames(label: str = ""):
+    while True:
+        try:
+            frame = capture_shared_frame()
+            frame = annotate_viewfinder(frame, name=label)
+            payload = encode_jpeg_frame(frame)
+            if payload is None:
+                continue
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
+            )
+            time.sleep(0.08)
+        except GeneratorExit:
+            break
+        except Exception as exc:
+            print(f"[viewfinder] frame error: {exc}")
+            time.sleep(0.25)
+
 @app.route('/')
 def index():
     return render_template('dashboard.html')
@@ -86,6 +132,15 @@ def index():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "ok"})
+
+
+@app.route('/api/viewfinder', methods=['GET'])
+def viewfinder():
+    label = request.args.get("label", "").strip()
+    return Response(
+        viewfinder_frames(label=label),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.route('/api/hardware/poll', methods=['GET'])
@@ -258,16 +313,9 @@ def get_student_image(student_id):
 
 @app.route('/api/capture', methods=['POST'])
 def capture_image():
-    camera = None
     try:
-        print("Initializing camera for capture...")
-        from camera import CameraManager
-        from config import CAMERA_INDEX
-        
-        camera = CameraManager(CAMERA_INDEX)
-        print("Camera initialized, capturing image...")
-        frame = camera.capture()
-        camera.release()
+        print("Capturing image from shared camera...")
+        frame = capture_shared_frame()
         
         if frame is None:
             return jsonify({"error": "Failed to capture image"}), 500
@@ -282,12 +330,6 @@ def capture_image():
     except Exception as e:
         print(f"Camera capture error: {e}")
         return jsonify({"error": str(e)}), 500
-    finally:
-        if camera is not None:
-            try:
-                camera.release()
-            except Exception:
-                pass
 
 if __name__ == '__main__':
     # For Raspberry Pi deployment, bind to all interfaces

@@ -63,19 +63,30 @@ function initializeCamera() {
         <div class="camera-shell">
             <div class="stage-placeholder">
                 <div class="placeholder-icon">📷</div>
-                <div class="placeholder-title">Camera ready</div>
-                <div class="placeholder-text">Use the Pi camera to capture the student ID card for verification.</div>
+                <div class="placeholder-title">Live viewfinder starting</div>
+                <div class="placeholder-text">Look at the camera. The green box appears only when a face is detected.</div>
             </div>
             <button class="action-btn capture-btn" id="captureBtn">Capture From Pi Camera</button>
-            <div class="camera-status" id="cameraStatus">Camera ready</div>
+            <div class="camera-status" id="cameraStatus">Camera live</div>
         </div>
     `;
 
     document.getElementById("captureBtn").addEventListener("click", captureImage);
+    startViewfinder();
+}
 
-    setTimeout(() => {
-        warmUpCamera();
-    }, 500);
+function startViewfinder(label = "") {
+    const liveImage = document.getElementById("liveImage");
+    const livePlaceholder = document.getElementById("livePlaceholder");
+    if (!liveImage || !livePlaceholder) return;
+
+    const params = new URLSearchParams();
+    if (label) params.set("label", label);
+    params.set("t", Date.now().toString());
+
+    liveImage.src = `/api/viewfinder?${params.toString()}`;
+    liveImage.style.display = "block";
+    livePlaceholder.style.display = "none";
 }
 
 async function warmUpCamera() {
@@ -280,6 +291,7 @@ async function processTag(tag) {
 
         currentStudentData = student;
         renderStudentQuickView(student);
+        startViewfinder(student.name);
         setMachineBanner(`Student identified: ${student.name}. Activating camera verification...`);
         setStepState("scan", "completed");
         setStepState("capture", "active");
@@ -477,8 +489,7 @@ function resetVerification() {
     currentCapturedImage = null;
     currentStudentData = null;
     currentVerificationScore = null;
-    document.getElementById("liveImage").style.display = "none";
-    document.getElementById("livePlaceholder").style.display = "block";
+    startViewfinder();
     document.getElementById("resultContainer").innerHTML = `
         <div class="result-content">
             <div class="placeholder-icon">🛡️</div>
