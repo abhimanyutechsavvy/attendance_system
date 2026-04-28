@@ -2,12 +2,41 @@ import cv2
 import numpy as np
 from pathlib import Path
 
+from config import MIN_FACE_SIZE_RATIO, REQUIRE_FACE_FOR_MATCH
+
 
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
 
+def detect_faces(image):
+    if image is None:
+        return []
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    if face_cascade.empty():
+        return []
+
+    min_side = max(24, int(min(gray.shape[:2]) * MIN_FACE_SIZE_RATIO))
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(min_side, min_side),
+    )
+    return list(faces)
+
+
+def has_detectable_face(image):
+    return len(detect_faces(image)) > 0
+
+
 def compare_images(live_image, stored_image, threshold: float = 0.25):
     if live_image is None or stored_image is None:
+        return False, 0.0
+
+    if REQUIRE_FACE_FOR_MATCH and not has_detectable_face(live_image):
         return False, 0.0
 
     live_gray = cv2.cvtColor(live_image, cv2.COLOR_BGR2GRAY)
